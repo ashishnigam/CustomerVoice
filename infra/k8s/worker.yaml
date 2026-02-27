@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customervoice-worker
+  namespace: cv-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customervoice-worker
+  template:
+    metadata:
+      labels:
+        app: customervoice-worker
+    spec:
+      containers:
+        - name: worker
+          image: customervoice/worker:latest
+          envFrom:
+            - secretRef:
+                name: customervoice-secrets

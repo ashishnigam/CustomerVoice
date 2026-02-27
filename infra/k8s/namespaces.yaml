@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cv-dev
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cv-staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cv-prod

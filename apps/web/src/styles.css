@@ -1,0 +1,31 @@
+:root {
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  color: #14213d;
+  background: linear-gradient(120deg, #f7f8fa, #edf2f7);
+}
+
+body {
+  margin: 0;
+}
+
+.container {
+  max-width: 860px;
+  margin: 40px auto;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(20, 33, 61, 0.08);
+}
+
+.eyebrow {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #718096;
+  margin: 0 0 8px;
+}
+
+h1 {
+  margin-top: 0;
+}

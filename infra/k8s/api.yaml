@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: customervoice-api
+  namespace: cv-staging
+spec:
+  selector:
+    app: customervoice-api
+  ports:
+    - port: 80
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customervoice-api
+  namespace: cv-staging
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: customervoice-api
+  template:
+    metadata:
+      labels:
+        app: customervoice-api
+    spec:
+      containers:
+        - name: api
+          image: customervoice/api:latest
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: customervoice-secrets

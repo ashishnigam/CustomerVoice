@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: customervoice
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniopassword
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  api:
+    image: node:20-alpine
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    command: sh -c "corepack enable && pnpm --filter @customervoice/api dev"
+    environment:
+      PORT: 4000
+      AUTH_MODE: mock
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/customervoice
+      REDIS_URL: redis://redis:6379
+      ENABLE_BOOTSTRAP_SEED: "true"
+      SEED_TENANT_ID: 11111111-1111-1111-1111-111111111111
+      SEED_WORKSPACE_ID: 22222222-2222-2222-2222-222222222222
+      SEED_USER_ID: 33333333-3333-3333-3333-333333333333
+      SEED_USER_EMAIL: admin@customervoice.local
+    ports:
+      - "4000:4000"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    image: node:20-alpine
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    command: sh -c "corepack enable && pnpm --filter @customervoice/worker dev"
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+
+  web:
+    image: node:20-alpine
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    command: sh -c "corepack enable && pnpm --filter @customervoice/web dev"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pg_data:

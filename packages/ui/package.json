@@ -1,0 +1,22 @@
+{
+  "name": "@customervoice/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'ui tests not scaffolded yet'",
+    "test:integration": "echo 'ui integration tests not scaffolded yet'",
+    "test:e2e": "echo 'ui e2e tests not scaffolded yet'"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.17"
+  }
+}
