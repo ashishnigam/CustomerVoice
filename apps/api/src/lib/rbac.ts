@@ -2,12 +2,27 @@ import { getPermissionOverride } from '../db/repositories.js';
 import type { Permission, Role } from './types.js';
 
 const defaultPermissions: Record<Role, Permission[]> = {
-  tenant_admin: ['membership:read', 'membership:write', 'audit:read', 'policy:read', 'policy:write'],
-  workspace_admin: ['membership:read', 'membership:write', 'audit:read', 'policy:read'],
-  product_manager: ['membership:read', 'audit:read'],
-  engineering_manager: ['membership:read', 'audit:read'],
-  contributor: ['membership:read'],
-  viewer: ['membership:read'],
+  tenant_admin: [
+    'board:read',
+    'board:write',
+    'membership:read',
+    'membership:write',
+    'audit:read',
+    'policy:read',
+    'policy:write',
+  ],
+  workspace_admin: [
+    'board:read',
+    'board:write',
+    'membership:read',
+    'membership:write',
+    'audit:read',
+    'policy:read',
+  ],
+  product_manager: ['board:read', 'board:write', 'membership:read', 'audit:read'],
+  engineering_manager: ['board:read', 'board:write', 'membership:read', 'audit:read'],
+  contributor: ['board:read', 'membership:read'],
+  viewer: ['board:read', 'membership:read'],
 };
 
 export async function can(params: {

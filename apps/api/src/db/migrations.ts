@@ -80,6 +80,27 @@ const migrations: Migration[] = [
         ON audit_events (workspace_id, created_at DESC);
     `,
   },
+  {
+    id: '002_boards_schema',
+    sql: `
+      CREATE TABLE IF NOT EXISTS boards (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        slug TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        visibility TEXT NOT NULL CHECK (visibility IN ('public', 'private')),
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_by TEXT NOT NULL REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (workspace_id, slug)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_boards_workspace_active
+        ON boards (workspace_id, active);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

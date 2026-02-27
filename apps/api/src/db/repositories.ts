@@ -20,6 +20,19 @@ interface AuditEventRow {
   created_at: string;
 }
 
+interface BoardRow {
+  id: string;
+  workspace_id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  visibility: 'public' | 'private';
+  active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MembershipRecord {
   userId: string;
   email: string;
@@ -36,6 +49,19 @@ export interface AuditRecord {
   action: string;
   metadata: Record<string, unknown>;
   createdAt: string;
+}
+
+export interface BoardRecord {
+  id: string;
+  workspaceId: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  visibility: 'public' | 'private';
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 function mapMembership(row: MembershipRow): MembershipRecord {
@@ -58,6 +84,32 @@ function mapAudit(row: AuditEventRow): AuditRecord {
     metadata: row.metadata ?? {},
     createdAt: row.created_at,
   };
+}
+
+function mapBoard(row: BoardRow): BoardRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    visibility: row.visibility,
+    active: row.active,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function slugify(value: string): string {
+  const base = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+
+  return base.length > 0 ? base : `board-${uuidv4().slice(0, 8)}`;
 }
 
 async function ensureUserWithClient(
@@ -103,6 +155,165 @@ export async function workspaceExists(workspaceId: string): Promise<boolean> {
     [workspaceId],
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+export async function listBoards(params: {
+  workspaceId: string;
+  includeInactive?: boolean;
+}): Promise<BoardRecord[]> {
+  const includeInactive = params.includeInactive ?? false;
+  const result = await query<BoardRow>(
+    `
+      SELECT
+        id,
+        workspace_id,
+        slug,
+        name,
+        description,
+        visibility,
+        active,
+        created_by,
+        created_at,
+        updated_at
+      FROM boards
+      WHERE workspace_id = $1
+        AND ($2::boolean = TRUE OR active = TRUE)
+      ORDER BY created_at DESC
+    `,
+    [params.workspaceId, includeInactive],
+  );
+
+  return result.rows.map(mapBoard);
+}
+
+export async function findBoard(params: {
+  workspaceId: string;
+  boardId: string;
+}): Promise<BoardRecord | null> {
+  const result = await query<BoardRow>(
+    `
+      SELECT
+        id,
+        workspace_id,
+        slug,
+        name,
+        description,
+        visibility,
+        active,
+        created_by,
+        created_at,
+        updated_at
+      FROM boards
+      WHERE workspace_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [params.workspaceId, params.boardId],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapBoard(result.rows[0]);
+}
+
+export async function createBoard(params: {
+  workspaceId: string;
+  name: string;
+  description?: string | null;
+  visibility: 'public' | 'private';
+  createdBy: string;
+}): Promise<BoardRecord> {
+  const id = uuidv4();
+  const slug = `${slugify(params.name)}-${id.slice(0, 8)}`;
+  const result = await query<BoardRow>(
+    `
+      INSERT INTO boards (id, workspace_id, slug, name, description, visibility, active, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)
+      RETURNING
+        id,
+        workspace_id,
+        slug,
+        name,
+        description,
+        visibility,
+        active,
+        created_by,
+        created_at,
+        updated_at
+    `,
+    [id, params.workspaceId, slug, params.name, params.description ?? null, params.visibility, params.createdBy],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    throw new Error('board_insert_failed');
+  }
+
+  return mapBoard(result.rows[0]);
+}
+
+export async function updateBoard(params: {
+  workspaceId: string;
+  boardId: string;
+  name?: string;
+  description?: string | null;
+  visibility?: 'public' | 'private';
+  active?: boolean;
+}): Promise<BoardRecord | null> {
+  const fields: string[] = [];
+  const values: unknown[] = [params.workspaceId, params.boardId];
+  let index = 3;
+
+  if (params.name !== undefined) {
+    fields.push(`name = $${index++}`);
+    values.push(params.name);
+  }
+
+  if (params.description !== undefined) {
+    fields.push(`description = $${index++}`);
+    values.push(params.description);
+  }
+
+  if (params.visibility !== undefined) {
+    fields.push(`visibility = $${index++}`);
+    values.push(params.visibility);
+  }
+
+  if (params.active !== undefined) {
+    fields.push(`active = $${index++}`);
+    values.push(params.active);
+  }
+
+  if (fields.length === 0) {
+    return findBoard({
+      workspaceId: params.workspaceId,
+      boardId: params.boardId,
+    });
+  }
+
+  fields.push('updated_at = NOW()');
+
+  const result = await query<BoardRow>(
+    `
+      UPDATE boards
+      SET ${fields.join(', ')}
+      WHERE workspace_id = $1 AND id = $2
+      RETURNING
+        id,
+        workspace_id,
+        slug,
+        name,
+        description,
+        visibility,
+        active,
+        created_by,
+        created_at,
+        updated_at
+    `,
+    values,
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    return null;
+  }
+
+  return mapBoard(result.rows[0]);
 }
 
 export async function findWorkspaceMembership(

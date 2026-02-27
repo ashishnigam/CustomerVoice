@@ -4,6 +4,7 @@ import { closePool } from './db/client.js';
 import { runBootstrapSeed } from './db/bootstrap-seed.js';
 import { runMigrations } from './db/migrations.js';
 import { auditRouter } from './routes/audit.js';
+import { boardsRouter } from './routes/boards.js';
 import { healthRouter } from './routes/health.js';
 import { membersRouter } from './routes/members.js';
 import { requireActor } from './middleware/auth.js';
@@ -15,6 +16,7 @@ app.use(cors());
 app.use(express.json());
 app.use(healthRouter);
 
+app.use('/api/v1', requireActor, boardsRouter);
 app.use('/api/v1', requireActor, membersRouter);
 app.use('/api/v1', requireActor, auditRouter);
 

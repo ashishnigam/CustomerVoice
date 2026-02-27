@@ -10,6 +10,8 @@ export const roleValues = [
 ] as const;
 
 export const permissionValues = [
+  'board:read',
+  'board:write',
   'membership:read',
   'membership:write',
   'audit:read',

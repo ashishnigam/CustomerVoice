@@ -13,6 +13,67 @@ components:
 security:
   - bearerAuth: []
 paths:
+  /workspaces/{workspaceId}/boards:
+    get:
+      summary: List boards in a workspace
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: includeInactive
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Board list
+    post:
+      summary: Create board
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Board created
+  /workspaces/{workspaceId}/boards/{boardId}:
+    get:
+      summary: Get board by id
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: boardId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Board details
+    patch:
+      summary: Update board
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: boardId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Board updated
   /workspaces/{workspaceId}/members:
     get:
       summary: List workspace members
