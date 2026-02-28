@@ -26,10 +26,7 @@ Single reference file to execute CustomerVoice v1 from decision lock to build st
 - theme/logo.
 4. Workflow completion:
 - notify voters/commenters when feature ships.
-- beta tester group selection and invite flow.
-5. AI-assisted pipeline:
-- accepted idea -> PRD/research draft -> implementation/test plan draft.
-- explicit human approvals by default at every gate.
+- moderation UX with merge/spam/lock actions.
 
 ## 4. Architecture baseline
 1. Stack:
@@ -49,10 +46,9 @@ Single reference file to execute CustomerVoice v1 from decision lock to build st
 
 ## 5. Release phases (6 months)
 1. Phase 0 (Weeks 1-4): auth/workspace/board foundation.
-2. Phase 1 (Weeks 5-10): portal interactions + internal dashboard + RICE.
-3. Phase 2 (Weeks 11-16): workflow engine + approvals + AI drafts.
-4. Phase 3 (Weeks 17-22): integrations and timeline.
-5. Phase 4 (Weeks 23-26): white-label hardening + notifications + beta cohorts + launch hardening.
+2. Phase 1 (Weeks 5-10): portal polish + moderation + notifications + internal analytics (RICE/revenue/outreach).
+3. Phase 2 (Weeks 11-16): beta cohorts + white-label v2 (custom domain/branded email) + GoodHealth/GoodWealth SSO embed.
+4. Phase 3 (Weeks 17-24): AI delivery pipeline (PRD/research/design/dev/release gates) with human approvals by default.
 
 ## 6. Engineering operating system
 1. Sprint length: 2 weeks.
@@ -109,6 +105,8 @@ Single reference file to execute CustomerVoice v1 from decision lock to build st
 - `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Engineering-Backlog-v1.md`
 5. Command plan:
 - `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Implementation-Command-Plan.md`
+6. CV-014+ ticket pack:
+- `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Phase2-Ticket-Pack-CV014-Plus.md`
 
 ## 11. Final remaining strategic choice
 1. Select first cloud provider once startup program approvals are known.

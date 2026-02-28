@@ -1,5 +1,7 @@
 # CustomerVoice Engineering Backlog (v1)
 
+> Sequencing update (locked): execution from `CV-014` onward is now governed by `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Phase2-Ticket-Pack-CV014-Plus.md`, where AI delivery pipeline work is moved to V3.
+
 ## 1. Delivery model
 - Sprint cadence: 2 weeks.
 - Planning horizon: 12 sprints (~6 months).
