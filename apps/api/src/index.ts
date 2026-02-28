@@ -1,29 +1,9 @@
-import cors from 'cors';
-import express from 'express';
+import { createApp } from './app.js';
 import { closePool } from './db/client.js';
 import { runBootstrapSeed } from './db/bootstrap-seed.js';
 import { runMigrations } from './db/migrations.js';
-import { auditRouter } from './routes/audit.js';
-import { boardsRouter } from './routes/boards.js';
-import { healthRouter } from './routes/health.js';
-import { membersRouter } from './routes/members.js';
-import { requireActor } from './middleware/auth.js';
-
-const app = express();
+const app = createApp();
 const port = Number(process.env.PORT ?? 4000);
-
-app.use(cors());
-app.use(express.json());
-app.use(healthRouter);
-
-app.use('/api/v1', requireActor, boardsRouter);
-app.use('/api/v1', requireActor, membersRouter);
-app.use('/api/v1', requireActor, auditRouter);
-
-app.use((err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-  void next;
-  res.status(500).json({ error: 'internal_error', message: err.message });
-});
 
 async function bootstrap(): Promise<void> {
   await runMigrations();

@@ -37,13 +37,13 @@ function getDisplayName(payload: JWTPayload): string | undefined {
 }
 
 function getWorkspaceContext(req: Request): string | null {
-  if (typeof req.params.workspaceId === 'string' && req.params.workspaceId.length > 0) {
-    return req.params.workspaceId;
-  }
-
   const workspaceHeader = req.header('x-workspace-id');
   if (workspaceHeader && workspaceHeader.length > 0) {
     return workspaceHeader;
+  }
+
+  if (typeof req.params.workspaceId === 'string' && req.params.workspaceId.length > 0) {
+    return req.params.workspaceId;
   }
 
   return null;
@@ -212,7 +212,14 @@ export function enforceWorkspaceScope(req: Request, res: Response, next: NextFun
     return;
   }
 
-  const workspaceId = req.params.workspaceId;
+  let workspaceId: string | null = null;
+  if (typeof req.params.workspaceId === 'string') {
+    workspaceId = req.params.workspaceId;
+  } else {
+    const pathMatch = req.path.match(/\/workspaces\/([^/]+)/);
+    workspaceId = pathMatch?.[1] ?? null;
+  }
+
   if (workspaceId && workspaceId !== request.actor.workspaceId) {
     res.status(403).json({ error: 'workspace_scope_violation' });
     return;
