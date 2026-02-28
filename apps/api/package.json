@@ -10,8 +10,9 @@
     "db:migrate": "tsx src/db/migrate-cli.ts",
     "lint": "eslint 'src/**/*.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --exclude test/integration-db/**",
     "test:integration": "vitest run --passWithNoTests --dir test/integration",
+    "test:integration:db": "vitest run --dir test/integration-db",
     "test:e2e": "echo 'api e2e tests not scaffolded yet'"
   },
   "dependencies": {

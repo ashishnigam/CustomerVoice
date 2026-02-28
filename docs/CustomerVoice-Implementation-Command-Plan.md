@@ -210,6 +210,12 @@ GitHub:
 pnpm --filter api test:integration:github
 ```
 
+DB-backed API integration tests:
+```bash
+pnpm --filter @customervoice/api db:migrate
+pnpm --filter @customervoice/api test:integration:db
+```
+
 ## 17. Launch operations commands
 Create release tag:
 ```bash
