@@ -4,6 +4,7 @@ import { requireActor } from './middleware/auth.js';
 import { auditRouter } from './routes/audit.js';
 import { boardsRouter } from './routes/boards.js';
 import { healthRouter } from './routes/health.js';
+import { ideasRouter } from './routes/ideas.js';
 import { membersRouter } from './routes/members.js';
 
 export function createApp(): express.Express {
@@ -14,6 +15,7 @@ export function createApp(): express.Express {
   app.use(healthRouter);
 
   app.use('/api/v1', requireActor, boardsRouter);
+  app.use('/api/v1', requireActor, ideasRouter);
   app.use('/api/v1', requireActor, membersRouter);
   app.use('/api/v1', requireActor, auditRouter);
 

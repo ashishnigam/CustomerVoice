@@ -32,7 +32,9 @@ function headers(params: {
 }
 
 async function seedBaseData(): Promise<void> {
-  await query('TRUNCATE TABLE workspace_role_permissions, audit_events, boards, workspace_memberships, users, workspaces, tenants RESTART IDENTITY CASCADE');
+  await query(
+    'TRUNCATE TABLE workspace_role_permissions, audit_events, idea_votes, idea_comments, ideas, boards, workspace_memberships, users, workspaces, tenants RESTART IDENTITY CASCADE',
+  );
 
   await query(
     `
@@ -225,5 +227,116 @@ describe('db-backed integration: boards + membership auth flow', () => {
 
     expect(response.status).toBe(403);
     expect(response.body.error).toBe('workspace_scope_violation');
+  });
+
+  it('supports idea lifecycle with votes and comments', async () => {
+    const boardResponse = await request(app)
+      .post(`/api/v1/workspaces/${WORKSPACE_ID}/boards`)
+      .set(headers({ userId: ADMIN_ID, role: 'workspace_admin' }))
+      .send({
+        name: 'Portal Board',
+        description: 'Parity board',
+        visibility: 'public',
+      });
+
+    expect(boardResponse.status).toBe(201);
+    const boardId = String(boardResponse.body.id);
+
+    const createIdeaResponse = await request(app)
+      .post(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/ideas`)
+      .set(headers({ userId: CONTRIBUTOR_ID, role: 'contributor' }))
+      .send({
+        title: 'Add dark mode in feedback portal',
+        description: 'Users want dark mode support for nightly feedback sessions.',
+      });
+
+    expect(createIdeaResponse.status).toBe(201);
+    const ideaId = String(createIdeaResponse.body.id);
+    expect(createIdeaResponse.body.status).toBe('new');
+
+    const voteResponse = await request(app)
+      .post(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/ideas/${ideaId}/votes`)
+      .set(headers({ userId: CONTRIBUTOR_ID, role: 'contributor' }));
+
+    expect(voteResponse.status).toBe(200);
+    expect(voteResponse.body.voteCount).toBe(1);
+    expect(voteResponse.body.hasVoted).toBe(true);
+
+    const commentResponse = await request(app)
+      .post(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/ideas/${ideaId}/comments`)
+      .set(headers({ userId: CONTRIBUTOR_ID, role: 'contributor' }))
+      .send({ body: 'I can help validate this with users.' });
+
+    expect(commentResponse.status).toBe(201);
+    expect(commentResponse.body.ideaId).toBe(ideaId);
+
+    const statusResponse = await request(app)
+      .patch(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/ideas/${ideaId}/status`)
+      .set(headers({ userId: ADMIN_ID, role: 'workspace_admin' }))
+      .send({ status: 'planned' });
+
+    expect(statusResponse.status).toBe(200);
+    expect(statusResponse.body.status).toBe('planned');
+
+    const ideaRows = await query<{ status: string; title: string }>(
+      `
+        SELECT status, title
+        FROM ideas
+        WHERE workspace_id = $1 AND id = $2
+      `,
+      [WORKSPACE_ID, ideaId],
+    );
+    expect(ideaRows.rowCount).toBe(1);
+    expect(ideaRows.rows[0]?.status).toBe('planned');
+
+    const voteRows = await query<{ vote_count: number }>(
+      `
+        SELECT COUNT(*)::int AS vote_count
+        FROM idea_votes
+        WHERE workspace_id = $1 AND idea_id = $2
+      `,
+      [WORKSPACE_ID, ideaId],
+    );
+    expect(voteRows.rows[0]?.vote_count).toBe(1);
+
+    const commentRows = await query<{ comment_count: number }>(
+      `
+        SELECT COUNT(*)::int AS comment_count
+        FROM idea_comments
+        WHERE workspace_id = $1 AND idea_id = $2
+      `,
+      [WORKSPACE_ID, ideaId],
+    );
+    expect(commentRows.rows[0]?.comment_count).toBe(1);
+  });
+
+  it('blocks status transition for contributor role', async () => {
+    const boardResponse = await request(app)
+      .post(`/api/v1/workspaces/${WORKSPACE_ID}/boards`)
+      .set(headers({ userId: ADMIN_ID, role: 'workspace_admin' }))
+      .send({
+        name: 'Core Board',
+        visibility: 'public',
+      });
+
+    const boardId = String(boardResponse.body.id);
+
+    const ideaResponse = await request(app)
+      .post(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/ideas`)
+      .set(headers({ userId: CONTRIBUTOR_ID, role: 'contributor' }))
+      .send({
+        title: 'Add richer status labels',
+        description: 'Expose accepted and declined labels to end users.',
+      });
+
+    const ideaId = String(ideaResponse.body.id);
+
+    const deniedResponse = await request(app)
+      .patch(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/ideas/${ideaId}/status`)
+      .set(headers({ userId: CONTRIBUTOR_ID, role: 'contributor' }))
+      .send({ status: 'accepted' });
+
+    expect(deniedResponse.status).toBe(403);
+    expect(deniedResponse.body.permission).toBe('idea:status:write');
   });
 });

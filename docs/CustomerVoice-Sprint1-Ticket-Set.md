@@ -85,6 +85,7 @@ Implement middleware to enforce role-to-action permissions for workspace APIs.
 - Owner: Frontend
 - Estimate: 5
 - Dependencies: CV-003, CV-004
+- Status: Completed (implemented in `apps/web/src/App.tsx`)
 - Description:
 Set up initial web shell with login state, workspace context, and navigation.
 - Acceptance criteria:
@@ -133,6 +134,7 @@ Add CI jobs for install, lint, typecheck, test.
 - Owner: PM/Designer
 - Estimate: 3
 - Dependencies: none
+- Status: Completed (artifact `docs/CV-010-UX-Copy-Spec.md`)
 - Description:
 Provide v1 IA, route map, and low-fidelity wireframes for foundational screens.
 - Acceptance criteria:
@@ -159,6 +161,7 @@ Create and run checklist validating auth, membership, role enforcement, and loca
 - Owner: Backend A
 - Estimate: 5
 - Dependencies: CV-002, CV-003
+- Status: Completed (`apps/api/src/routes/boards.ts` + DB-backed tests)
 - Description:
 Add first board domain model and create/list endpoints.
 - Acceptance criteria:
@@ -170,6 +173,7 @@ Add first board domain model and create/list endpoints.
 - Owner: Frontend
 - Estimate: 3
 - Dependencies: CV-006, CV-012
+- Status: Completed (`apps/web/src/App.tsx` board list wired to live API)
 - Description:
 Render board list page using API.
 - Acceptance criteria:

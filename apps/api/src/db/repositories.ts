@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { query, withTransaction } from './client.js';
-import type { PermissionEffect, Role } from '../lib/types.js';
+import type { IdeaStatus, PermissionEffect, Role } from '../lib/types.js';
 
 interface MembershipRow {
   user_id: string;
@@ -29,6 +29,35 @@ interface BoardRow {
   visibility: 'public' | 'private';
   active: boolean;
   created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface IdeaRow {
+  id: string;
+  workspace_id: string;
+  board_id: string;
+  title: string;
+  description: string;
+  status: IdeaStatus;
+  active: boolean;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  vote_count?: number | string | null;
+  comment_count?: number | string | null;
+  viewer_has_voted?: boolean | null;
+}
+
+interface IdeaCommentRow {
+  id: string;
+  workspace_id: string;
+  idea_id: string;
+  user_id: string;
+  user_email: string;
+  body: string;
+  active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +93,41 @@ export interface BoardRecord {
   updatedAt: string;
 }
 
+export interface IdeaRecord {
+  id: string;
+  workspaceId: string;
+  boardId: string;
+  title: string;
+  description: string;
+  status: IdeaStatus;
+  active: boolean;
+  createdBy: string;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  voteCount: number;
+  commentCount: number;
+  viewerHasVoted: boolean;
+}
+
+export interface IdeaCommentRecord {
+  id: string;
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+  userEmail: string;
+  body: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IdeaVoteRecord {
+  ideaId: string;
+  voteCount: number;
+  hasVoted: boolean;
+}
+
 function mapMembership(row: MembershipRow): MembershipRecord {
   return {
     userId: row.user_id,
@@ -96,6 +160,39 @@ function mapBoard(row: BoardRow): BoardRecord {
     visibility: row.visibility,
     active: row.active,
     createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapIdea(row: IdeaRow): IdeaRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    boardId: row.board_id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    active: row.active,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    voteCount: Number(row.vote_count ?? 0),
+    commentCount: Number(row.comment_count ?? 0),
+    viewerHasVoted: Boolean(row.viewer_has_voted ?? false),
+  };
+}
+
+function mapIdeaComment(row: IdeaCommentRow): IdeaCommentRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    ideaId: row.idea_id,
+    userId: row.user_id,
+    userEmail: row.user_email,
+    body: row.body,
+    active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -314,6 +411,352 @@ export async function updateBoard(params: {
   }
 
   return mapBoard(result.rows[0]);
+}
+
+export async function listIdeas(params: {
+  workspaceId: string;
+  boardId: string;
+  status?: IdeaStatus;
+  includeInactive?: boolean;
+  search?: string;
+  limit?: number;
+  viewerId?: string;
+}): Promise<IdeaRecord[]> {
+  const includeInactive = params.includeInactive ?? false;
+  const clampedLimit = Math.max(1, Math.min(params.limit ?? 100, 200));
+  const search = params.search?.trim();
+  const result = await query<IdeaRow>(
+    `
+      SELECT
+        i.id,
+        i.workspace_id,
+        i.board_id,
+        i.title,
+        i.description,
+        i.status,
+        i.active,
+        i.created_by,
+        i.updated_by,
+        i.created_at,
+        i.updated_at,
+        COALESCE(v.vote_count, 0)::int AS vote_count,
+        COALESCE(c.comment_count, 0)::int AS comment_count,
+        CASE
+          WHEN $7::text IS NULL THEN FALSE
+          ELSE EXISTS (
+            SELECT 1
+            FROM idea_votes iv2
+            WHERE iv2.workspace_id = i.workspace_id AND iv2.idea_id = i.id AND iv2.user_id = $7
+          )
+        END AS viewer_has_voted
+      FROM ideas i
+      LEFT JOIN (
+        SELECT workspace_id, idea_id, COUNT(*) AS vote_count
+        FROM idea_votes
+        WHERE workspace_id = $1
+        GROUP BY workspace_id, idea_id
+      ) v ON v.workspace_id = i.workspace_id AND v.idea_id = i.id
+      LEFT JOIN (
+        SELECT workspace_id, idea_id, COUNT(*) AS comment_count
+        FROM idea_comments
+        WHERE workspace_id = $1 AND active = TRUE
+        GROUP BY workspace_id, idea_id
+      ) c ON c.workspace_id = i.workspace_id AND c.idea_id = i.id
+      WHERE i.workspace_id = $1
+        AND i.board_id = $2
+        AND ($3::text IS NULL OR i.status = $3)
+        AND ($4::boolean = TRUE OR i.active = TRUE)
+        AND (
+          $5::text IS NULL
+          OR i.title ILIKE '%' || $5 || '%'
+          OR i.description ILIKE '%' || $5 || '%'
+        )
+      ORDER BY
+        COALESCE(v.vote_count, 0) DESC,
+        i.created_at DESC
+      LIMIT $6
+    `,
+    [
+      params.workspaceId,
+      params.boardId,
+      params.status ?? null,
+      includeInactive,
+      search && search.length > 0 ? search : null,
+      clampedLimit,
+      params.viewerId ?? null,
+    ],
+  );
+
+  return result.rows.map(mapIdea);
+}
+
+export async function findIdea(params: {
+  workspaceId: string;
+  boardId: string;
+  ideaId: string;
+  viewerId?: string;
+}): Promise<IdeaRecord | null> {
+  const result = await query<IdeaRow>(
+    `
+      SELECT
+        i.id,
+        i.workspace_id,
+        i.board_id,
+        i.title,
+        i.description,
+        i.status,
+        i.active,
+        i.created_by,
+        i.updated_by,
+        i.created_at,
+        i.updated_at,
+        (
+          SELECT COUNT(*)::int
+          FROM idea_votes iv
+          WHERE iv.workspace_id = i.workspace_id AND iv.idea_id = i.id
+        ) AS vote_count,
+        (
+          SELECT COUNT(*)::int
+          FROM idea_comments ic
+          WHERE ic.workspace_id = i.workspace_id AND ic.idea_id = i.id AND ic.active = TRUE
+        ) AS comment_count,
+        CASE
+          WHEN $4::text IS NULL THEN FALSE
+          ELSE EXISTS (
+            SELECT 1
+            FROM idea_votes iv2
+            WHERE iv2.workspace_id = i.workspace_id AND iv2.idea_id = i.id AND iv2.user_id = $4
+          )
+        END AS viewer_has_voted
+      FROM ideas i
+      WHERE i.workspace_id = $1 AND i.board_id = $2 AND i.id = $3
+      LIMIT 1
+    `,
+    [params.workspaceId, params.boardId, params.ideaId, params.viewerId ?? null],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapIdea(result.rows[0]);
+}
+
+export async function createIdea(params: {
+  workspaceId: string;
+  boardId: string;
+  title: string;
+  description: string;
+  status?: IdeaStatus;
+  createdBy: string;
+}): Promise<IdeaRecord> {
+  const id = uuidv4();
+  const status = params.status ?? 'new';
+  const result = await query<IdeaRow>(
+    `
+      INSERT INTO ideas (
+        id,
+        workspace_id,
+        board_id,
+        title,
+        description,
+        status,
+        active,
+        created_by,
+        updated_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, $7)
+      RETURNING
+        id,
+        workspace_id,
+        board_id,
+        title,
+        description,
+        status,
+        active,
+        created_by,
+        updated_by,
+        created_at,
+        updated_at,
+        0::int AS vote_count,
+        0::int AS comment_count,
+        FALSE AS viewer_has_voted
+    `,
+    [
+      id,
+      params.workspaceId,
+      params.boardId,
+      params.title,
+      params.description,
+      status,
+      params.createdBy,
+    ],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    throw new Error('idea_insert_failed');
+  }
+
+  return mapIdea(result.rows[0]);
+}
+
+export async function updateIdeaStatus(params: {
+  workspaceId: string;
+  boardId: string;
+  ideaId: string;
+  status: IdeaStatus;
+  updatedBy: string;
+  viewerId?: string;
+}): Promise<IdeaRecord | null> {
+  const updated = await query<{ id: string }>(
+    `
+      UPDATE ideas
+      SET status = $4, updated_by = $5, updated_at = NOW()
+      WHERE workspace_id = $1 AND board_id = $2 AND id = $3
+      RETURNING id
+    `,
+    [params.workspaceId, params.boardId, params.ideaId, params.status, params.updatedBy],
+  );
+
+  if ((updated.rowCount ?? 0) === 0) {
+    return null;
+  }
+
+  return findIdea({
+    workspaceId: params.workspaceId,
+    boardId: params.boardId,
+    ideaId: params.ideaId,
+    viewerId: params.viewerId ?? params.updatedBy,
+  });
+}
+
+async function getIdeaVoteState(params: {
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+}): Promise<IdeaVoteRecord> {
+  const result = await query<{ vote_count: number | string; has_voted: boolean }>(
+    `
+      SELECT
+        COUNT(*)::int AS vote_count,
+        EXISTS (
+          SELECT 1
+          FROM idea_votes iv2
+          WHERE iv2.workspace_id = $1 AND iv2.idea_id = $2 AND iv2.user_id = $3
+        ) AS has_voted
+      FROM idea_votes iv
+      WHERE iv.workspace_id = $1 AND iv.idea_id = $2
+    `,
+    [params.workspaceId, params.ideaId, params.userId],
+  );
+
+  return {
+    ideaId: params.ideaId,
+    voteCount: Number(result.rows[0]?.vote_count ?? 0),
+    hasVoted: Boolean(result.rows[0]?.has_voted),
+  };
+}
+
+export async function voteIdea(params: {
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+}): Promise<IdeaVoteRecord> {
+  await query(
+    `
+      INSERT INTO idea_votes (workspace_id, idea_id, user_id)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (idea_id, user_id) DO NOTHING
+    `,
+    [params.workspaceId, params.ideaId, params.userId],
+  );
+
+  return getIdeaVoteState(params);
+}
+
+export async function unvoteIdea(params: {
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+}): Promise<IdeaVoteRecord> {
+  await query(
+    `
+      DELETE FROM idea_votes
+      WHERE workspace_id = $1 AND idea_id = $2 AND user_id = $3
+    `,
+    [params.workspaceId, params.ideaId, params.userId],
+  );
+
+  return getIdeaVoteState(params);
+}
+
+export async function listIdeaComments(params: {
+  workspaceId: string;
+  ideaId: string;
+  limit?: number;
+}): Promise<IdeaCommentRecord[]> {
+  const clampedLimit = Math.max(1, Math.min(params.limit ?? 100, 300));
+  const result = await query<IdeaCommentRow>(
+    `
+      SELECT
+        c.id,
+        c.workspace_id,
+        c.idea_id,
+        c.user_id,
+        u.email AS user_email,
+        c.body,
+        c.active,
+        c.created_at,
+        c.updated_at
+      FROM idea_comments c
+      JOIN users u ON u.id = c.user_id
+      WHERE c.workspace_id = $1 AND c.idea_id = $2 AND c.active = TRUE
+      ORDER BY c.created_at ASC
+      LIMIT $3
+    `,
+    [params.workspaceId, params.ideaId, clampedLimit],
+  );
+
+  return result.rows.map(mapIdeaComment);
+}
+
+export async function createIdeaComment(params: {
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+  body: string;
+}): Promise<IdeaCommentRecord> {
+  const id = uuidv4();
+  const result = await query<IdeaCommentRow>(
+    `
+      INSERT INTO idea_comments (
+        id,
+        workspace_id,
+        idea_id,
+        user_id,
+        body,
+        active
+      )
+      VALUES ($1, $2, $3, $4, $5, TRUE)
+      RETURNING
+        id,
+        workspace_id,
+        idea_id,
+        user_id,
+        (
+          SELECT email
+          FROM users
+          WHERE id = $4
+        ) AS user_email,
+        body,
+        active,
+        created_at,
+        updated_at
+    `,
+    [id, params.workspaceId, params.ideaId, params.userId, params.body],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    throw new Error('idea_comment_insert_failed');
+  }
+
+  return mapIdeaComment(result.rows[0]);
 }
 
 export async function findWorkspaceMembership(

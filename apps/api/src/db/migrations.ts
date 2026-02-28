@@ -14,6 +14,16 @@ const roles = [
   "'viewer'",
 ].join(',');
 
+const ideaStatuses = [
+  "'new'",
+  "'under_review'",
+  "'accepted'",
+  "'planned'",
+  "'in_progress'",
+  "'completed'",
+  "'declined'",
+].join(',');
+
 const migrations: Migration[] = [
   {
     id: '001_initial_schema',
@@ -99,6 +109,52 @@ const migrations: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_boards_workspace_active
         ON boards (workspace_id, active);
+    `,
+  },
+  {
+    id: '003_ideas_schema',
+    sql: `
+      CREATE TABLE IF NOT EXISTS ideas (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (${ideaStatuses})),
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_by TEXT NOT NULL REFERENCES users(id),
+        updated_by TEXT REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS idea_votes (
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (idea_id, user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS idea_comments (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ideas_workspace_board_status
+        ON ideas (workspace_id, board_id, status, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_idea_votes_workspace_idea
+        ON idea_votes (workspace_id, idea_id);
+
+      CREATE INDEX IF NOT EXISTS idx_idea_comments_workspace_idea
+        ON idea_comments (workspace_id, idea_id, created_at DESC);
     `,
   },
 ];
