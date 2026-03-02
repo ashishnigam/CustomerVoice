@@ -88,7 +88,7 @@ cp apps/mobile/.env.example apps/mobile/.env
 3. Start local infra and services:
 ```bash
 POSTGRES_PORT=55432 docker compose -f infra/docker/docker-compose.yml up -d postgres redis mailhog minio
-pnpm --filter @customervoice/api db:migrate
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm --filter @customervoice/api db:migrate
 pnpm dev
 ```
 

@@ -222,8 +222,8 @@ cp .env.example .env
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 cp apps/worker/.env.example apps/worker/.env
-docker compose -f infra/docker/docker-compose.yml up -d postgres redis mailhog minio
-pnpm --filter @customervoice/api db:migrate
+POSTGRES_PORT=55432 docker compose -f infra/docker/docker-compose.yml up -d postgres redis mailhog minio
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm --filter @customervoice/api db:migrate
 pnpm dev`;
 
 const apiGroups = [
