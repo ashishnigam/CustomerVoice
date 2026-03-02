@@ -3,6 +3,7 @@
 CustomerVoice is a multi-tenant feedback and product-delivery orchestration platform inspired by UserVoice and Microsoft Feedback Portal workflows.
 
 Current implementation includes:
+- Marketing website with routes for home, features, pricing, blog, and developer docs.
 - Workspace-aware feedback portal with boards, ideas, votes, comments, categories, and status transitions.
 - Portal search/sort/filter flows plus moderation queue for spam, comment lock, duplicate merge, and bulk actions.
 - Notification job pipeline for shipped-idea updates and analytics outreach emails.
@@ -12,7 +13,7 @@ Current implementation includes:
 - Audit event persistence for auth, moderation, notification, and analytics actions.
 
 ## Repository structure
-- `/apps/web`: React web shell for portal, moderation, and analytics UX
+- `/apps/web`: React marketing site plus portal, moderation, and analytics UX
 - `/apps/api`: Node + Express API for feedback, moderation, analytics, membership, and audit
 - `/apps/worker`: notification dispatcher worker (MailHog/SMTP locally)
 - `/apps/mobile`: React Native (Expo) shell
@@ -86,16 +87,22 @@ cp apps/mobile/.env.example apps/mobile/.env
 
 3. Start local infra and services:
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d postgres redis mailhog minio
+POSTGRES_PORT=55432 docker compose -f infra/docker/docker-compose.yml up -d postgres redis mailhog minio
 pnpm --filter @customervoice/api db:migrate
 pnpm dev
 ```
 
 Default local URLs:
-- Web: `http://localhost:3000`
+- Website: `http://localhost:3000`
+- Web app: `http://localhost:3000/app`
 - API: `http://localhost:4000`
 - API health: `http://localhost:4000/health`
 - MailHog UI: `http://localhost:8025`
+
+If local port `5432` is already in use, keep using `POSTGRES_PORT=55432` and run host-side DB commands with:
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm --filter @customervoice/api db:migrate
+```
 
 ## Auth modes
 ### `AUTH_MODE=mock` (local default)
@@ -148,15 +155,16 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice pnpm --
 ```
 
 ## Manual test flow
-1. Open `http://localhost:3000` and sign in with mock admin values.
-2. Create a board.
-3. Create categories.
-4. Create ideas and tag them.
-5. Verify search, status filter, category filter, and sort modes.
-6. Upvote/comment as contributor.
-7. Use `Moderation` tab to lock comments or merge duplicates.
-8. Use `Analytics` tab to save RICE/revenue inputs, export CSV, and enqueue outreach.
-9. Move an idea to `completed` and check MailHog for notification delivery.
+1. Open `http://localhost:3000` for the marketing website or `http://localhost:3000/app` for the application shell.
+2. Sign in with mock admin values in the app shell.
+3. Create a board.
+4. Create categories.
+5. Create ideas and tag them.
+6. Verify search, status filter, category filter, and sort modes.
+7. Upvote/comment as contributor.
+8. Use `Moderation` tab to lock comments or merge duplicates.
+9. Use `Analytics` tab to save RICE/revenue inputs, export CSV, and enqueue outreach.
+10. Move an idea to `completed` and check MailHog for notification delivery.
 
 ## API surface (current)
 See `/Users/ashishnigam/Startups/CustomerVoice/apps/api/openapi/openapi.yaml`.
@@ -195,6 +203,8 @@ Major endpoint groups:
 ## QA artifacts
 - Sprint-1 checklist: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-011-QA-UAT-Checklist.md`
 - V1 parity checklist: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-023-V1-Parity-QA-UAT-Checklist.md`
+- V1 parity map: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-V1-Parity-Mapping.md`
+- Live working context: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Live-Working-Context.md`
 - UX/copy handoff: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-010-UX-Copy-Spec.md`
 
 ## CI
