@@ -130,7 +130,7 @@ export function App(): JSX.Element {
   }
 
   if (isPortalPath(rawPath)) {
-    return <PortalApp />;
+    return <PortalApp path={rawPath} onNavigate={navigate} />;
   }
 
   return <MarketingSite path={marketingPath} onNavigate={navigate} />;

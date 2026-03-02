@@ -89,12 +89,14 @@ Core V1 thesis:
 
 ## 8. What is live in the codebase now
 1. Marketing website routes at `/`, `/features`, `/pricing`, `/blog`, `/docs`, `/docs/api`, and `/docs/integrations`.
-2. Web application route at `/app`.
-3. Public portal workflows for boards, ideas, votes, comments, statuses, and category filtering.
-4. Internal moderation workflows for spam, restore, comment lock, duplicate merge, and bulk actions.
-5. Internal analytics for RICE, revenue potential, audience discovery, CSV export, and outreach enqueue.
-6. Notification worker for shipped idea emails.
-7. Mock auth and Supabase auth modes.
+2. Brand summary route at `/docs/brand`.
+3. Web application route at `/app` plus shareable board routes at `/app/boards/:slug`.
+4. Public portal workflows for boards, ideas, votes, comments, statuses, and category filtering.
+5. Internal moderation workflows for spam, restore, comment lock, duplicate merge, and bulk actions.
+6. Internal analytics for RICE, revenue potential, audience discovery, CSV export, and outreach enqueue.
+7. Notification worker for shipped idea emails.
+8. Mock auth and Supabase auth modes.
+9. Product UX split between board setup and customer-facing board preview.
 
 ## 9. Remaining work by phase
 ### V2 backlog
@@ -155,6 +157,8 @@ pnpm --filter @customervoice/api test:integration:db
 1. V1 parity checklist: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-023-V1-Parity-QA-UAT-Checklist.md`
 2. V1 scoped parity map: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-V1-Parity-Mapping.md`
 3. UX and copy reference: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-010-UX-Copy-Spec.md`
+4. Brand guideline source: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Brand-Guidelines.md`
+5. Current execution tracker: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Execution-Tracker.md`
 
 ## 14. Source-of-truth planning docs
 1. `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Master-Execution-Pack-v1.md`

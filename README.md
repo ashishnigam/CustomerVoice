@@ -4,6 +4,7 @@ CustomerVoice is a multi-tenant feedback and product-delivery orchestration plat
 
 Current implementation includes:
 - Marketing website with routes for home, features, pricing, blog, and developer docs.
+- Brand and design guideline documentation for future UI and marketing consistency.
 - Workspace-aware feedback portal with boards, ideas, votes, comments, categories, and status transitions.
 - Portal search/sort/filter flows plus moderation queue for spam, comment lock, duplicate merge, and bulk actions.
 - Notification job pipeline for shipped-idea updates and analytics outreach emails.
@@ -30,6 +31,7 @@ Current implementation includes:
   - Unauthorized API response handling (`401/403` -> redirect to login)
 - Public portal
   - Board list/create
+  - Shareable board route by slug (`/app/boards/:slug`)
   - Idea list/detail/create
   - Upvote/unvote
   - Comments list/create
@@ -157,7 +159,7 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice pnpm --
 ## Manual test flow
 1. Open `http://localhost:3000` for the marketing website or `http://localhost:3000/app` for the application shell.
 2. Sign in with mock admin values in the app shell.
-3. Create a board.
+3. Create a board and confirm the app moves to `/app/boards/:slug`.
 4. Create categories.
 5. Create ideas and tag them.
 6. Verify search, status filter, category filter, and sort modes.
@@ -205,6 +207,8 @@ Major endpoint groups:
 - V1 parity checklist: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-023-V1-Parity-QA-UAT-Checklist.md`
 - V1 parity map: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-V1-Parity-Mapping.md`
 - Live working context: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Live-Working-Context.md`
+- Execution tracker: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Execution-Tracker.md`
+- Brand guideline source: `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Brand-Guidelines.md`
 - UX/copy handoff: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-010-UX-Copy-Spec.md`
 
 ## CI

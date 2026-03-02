@@ -1,4 +1,9 @@
 import type { MouseEvent, ReactNode } from 'react';
+import {
+  EnterpriseReadyIllustration,
+  FeedbackLoopIllustration,
+  PortalBoardIllustration,
+} from './marketingIllustrations';
 
 type NavigateFn = (path: string) => void;
 
@@ -265,7 +270,37 @@ const docsRoadmap = [
   'AI-driven PRD, research, design, development, and release gates are intentionally moved to V3.',
 ];
 
-const knownStaticRoutes = new Set(['/', '/features', '/pricing', '/blog', '/docs', '/docs/api', '/docs/integrations']);
+const useCases = [
+  {
+    title: 'Founder-led SaaS teams',
+    body: 'Turn customer calls, support requests, and account pressure into one visible board instead of a hidden spreadsheet.',
+  },
+  {
+    title: 'Product and engineering leadership',
+    body: 'Run moderation, prioritization, and shipped communication from the same surface instead of stitching together multiple tools.',
+  },
+  {
+    title: 'Regulated and enterprise-leaning teams',
+    body: 'Start with a simple multi-tenant product while preserving the architectural room needed for private AI, regional rollout, and enterprise controls.',
+  },
+];
+
+const outcomeSignals = [
+  'A visible public feedback board that customers can understand quickly.',
+  'An internal operating layer for moderation, RICE, revenue context, and outreach.',
+  'A GTM-friendly website with SEO content, product narrative, and developer-facing docs.',
+];
+
+const knownStaticRoutes = new Set([
+  '/',
+  '/features',
+  '/pricing',
+  '/blog',
+  '/docs',
+  '/docs/api',
+  '/docs/integrations',
+  '/docs/brand',
+]);
 
 function getBlogPostByPath(path: string): BlogPost | undefined {
   return blogPosts.find((post) => `/blog/${post.slug}` === path);
@@ -372,6 +407,12 @@ export function getMarketingMetadata(path: string, origin: string): PageMetadata
         'Understand the current CustomerVoice integration surface, auth options, and the planned roadmap for embed and connector workflows.',
       ogType: 'website',
     },
+    '/docs/brand': {
+      title: 'CustomerVoice Brand Guide | Design System And Voice Principles',
+      description:
+        'Review the CustomerVoice brand system covering visual language, voice, illustration style, and product-to-marketing experience rules.',
+      ogType: 'website',
+    },
   };
 
   const page = pageMap[normalizedPath] ?? pageMap['/'];
@@ -434,59 +475,45 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
     <>
       <section className="hero-grid">
         <div className="hero-copy">
-          <p className="eyebrow marketing-eyebrow">Feedback Ops For Product-Led Teams</p>
-          <h1 className="hero-title">Turn product feedback into a visible, prioritized, and closed-loop workflow.</h1>
+          <p className="eyebrow marketing-eyebrow">Customer Feedback, Prioritization, And Product Delivery Visibility</p>
+          <h1 className="hero-title">Build the public board customers want, with the internal workflow product teams need.</h1>
           <p className="hero-body">
-            CustomerVoice combines a Microsoft-style public feedback portal with internal moderation, RICE scoring,
-            revenue context, and shipped notifications so teams can run a cleaner product decision system.
+            CustomerVoice is a feedback operations platform for SaaS teams that want more than a voting board. Capture
+            demand publicly, moderate and prioritize it internally, then close the loop when work ships.
           </p>
           <div className="hero-actions">
             <SiteLink className="hero-button primary" path="/app" onNavigate={onNavigate}>
-              Launch Web App
+              Launch The App
             </SiteLink>
             <SiteLink className="hero-button secondary" path="/docs" onNavigate={onNavigate}>
-              Read Developer Docs
+              Explore Docs
             </SiteLink>
           </div>
           <div className="hero-metrics">
             <div>
-              <strong>Global-first</strong>
-              <span>US enabled by default, EU and India designed as activatable zones.</span>
+              <strong>Public board</strong>
+              <span>Customers can see requests, vote, comment, and follow visible statuses.</span>
             </div>
             <div>
-              <strong>Hybrid GTM</strong>
-              <span>SEO and content-led self-serve with a sales-assisted enterprise motion.</span>
+              <strong>Internal cockpit</strong>
+              <span>Moderation, analytics, and outreach live behind the same product surface.</span>
             </div>
             <div>
-              <strong>Compliance-ready</strong>
-              <span>Engineered toward SOC 2, HIPAA, GDPR, and ISO 27001 readiness.</span>
+              <strong>Enterprise posture</strong>
+              <span>Cloud-neutral and compliance-ready without pretending enterprise features are already done.</span>
             </div>
           </div>
         </div>
         <aside className="hero-panel">
-          <p className="eyebrow marketing-eyebrow">What V1 already delivers</p>
-          <div className="hero-panel-stack">
-            <article>
-              <strong>Public feedback portal</strong>
-              <p>Boards, ideas, votes, comments, status visibility, search, sort, filters, and category tagging.</p>
-            </article>
-            <article>
-              <strong>Internal decision cockpit</strong>
-              <p>Moderation queue, RICE inputs, revenue potential, CSV export, and customer outreach lists.</p>
-            </article>
-            <article>
-              <strong>Notification workflow</strong>
-              <p>Completion notifications and outreach jobs dispatched through the worker pipeline.</p>
-            </article>
-          </div>
+          <PortalBoardIllustration />
         </aside>
       </section>
 
       <section className="marketing-section">
         <div className="section-heading-row">
           <div>
-            <p className="eyebrow marketing-eyebrow">Platform Surface</p>
-            <h2>Built for the work that happens after feedback arrives.</h2>
+            <p className="eyebrow marketing-eyebrow">Why CustomerVoice</p>
+            <h2>Most feedback tools stop at collection. Product teams do not.</h2>
           </div>
           <SiteLink className="inline-link" path="/features" onNavigate={onNavigate}>
             View full feature breakdown
@@ -503,17 +530,22 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
-      <section className="marketing-section">
-        <p className="eyebrow marketing-eyebrow">Workflow</p>
-        <h2>From demand intake to shipped update.</h2>
-        <div className="workflow-grid">
-          {workflowSteps.map((step) => (
-            <article className="workflow-card" key={step.label}>
-              <span>{step.label}</span>
-              <h3>{step.title}</h3>
-              <p>{step.body}</p>
-            </article>
-          ))}
+      <section className="marketing-section split-visual-section">
+        <div>
+          <p className="eyebrow marketing-eyebrow">Workflow</p>
+          <h2>From demand intake to shipped update.</h2>
+          <div className="workflow-grid">
+            {workflowSteps.map((step) => (
+              <article className="workflow-card" key={step.label}>
+                <span>{step.label}</span>
+                <h3>{step.title}</h3>
+                <p>{step.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="visual-card">
+          <FeedbackLoopIllustration />
         </div>
       </section>
 
@@ -532,14 +564,67 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
+      <section className="marketing-section">
+        <div className="section-heading-row">
+          <div>
+            <p className="eyebrow marketing-eyebrow">Who This Is For</p>
+            <h2>Built for teams that want product feedback to become an operating system.</h2>
+          </div>
+        </div>
+        <div className="marketing-card-grid three-up">
+          {useCases.map((item) => (
+            <article className="marketing-card" key={item.title}>
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="marketing-section split-visual-section">
+        <div>
+          <p className="eyebrow marketing-eyebrow">Enterprise-Ready Direction</p>
+          <h2>Simple product now, serious architecture underneath.</h2>
+          <div className="marketing-card compact-callout">
+            <ul className="marketing-list">
+              <li>Global-first posture with US default zone and planned EU/India activation.</li>
+              <li>Mock auth locally and Supabase JWT verification for production-ready identity flows.</li>
+              <li>Architecture prepared for SOC 2, HIPAA, GDPR, and ISO 27001 evidence-building.</li>
+            </ul>
+          </div>
+        </div>
+        <div className="visual-card">
+          <EnterpriseReadyIllustration />
+        </div>
+      </section>
+
+      <section className="marketing-section">
+        <div className="section-heading-row">
+          <div>
+            <p className="eyebrow marketing-eyebrow">What Launch Actually Delivers</p>
+            <h2>Marketing promise and shipped scope stay aligned.</h2>
+          </div>
+          <SiteLink className="inline-link" path="/docs/integrations" onNavigate={onNavigate}>
+            Review implementation boundaries
+          </SiteLink>
+        </div>
+        <div className="marketing-card-grid three-up">
+          {outcomeSignals.map((item) => (
+            <article className="marketing-card" key={item}>
+              <p>{item}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="marketing-section cta-strip">
         <div>
           <p className="eyebrow marketing-eyebrow">Next Step</p>
-          <h2>Use the website for discovery. Use the app for the actual workflow.</h2>
+          <h2>Use the website to evaluate the category. Use the app to run the workflow.</h2>
         </div>
         <div className="button-cluster">
           <SiteLink className="hero-button primary" path="/pricing" onNavigate={onNavigate}>
-            See Packaging
+            See Pricing
           </SiteLink>
           <SiteLink className="hero-button ghost" path="/blog" onNavigate={onNavigate}>
             Read The Blog
@@ -776,6 +861,13 @@ function renderDocsOverview(onNavigate: NavigateFn): JSX.Element {
             Open integration guide
           </SiteLink>
         </article>
+        <article className="marketing-card docs-card">
+          <h2>Brand guide</h2>
+          <p>Visual language, voice, illustration style, and app-to-marketing consistency rules for future work.</p>
+          <SiteLink className="inline-link" path="/docs/brand" onNavigate={onNavigate}>
+            Open brand guide
+          </SiteLink>
+        </article>
       </section>
     </>
   );
@@ -854,6 +946,42 @@ function renderDocsIntegrations(): JSX.Element {
   );
 }
 
+function renderDocsBrand(): JSX.Element {
+  return (
+    <>
+      <section className="page-intro">
+        <p className="eyebrow marketing-eyebrow">Brand Guide</p>
+        <h1>Design and voice rules for keeping CustomerVoice coherent as the product grows.</h1>
+        <p>
+          The long-form source document lives in
+          {' '}
+          <code>/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Brand-Guidelines.md</code>
+          . This page is the short operational summary for designers, engineers, and AI agents working in the repo.
+        </p>
+      </section>
+
+      <section className="marketing-card-grid two-up">
+        <article className="marketing-card docs-card">
+          <h2>Brand posture</h2>
+          <ul className="marketing-list">
+            <li>Serious product operations software, not a playful suggestion box.</li>
+            <li>Clear, pragmatic, and evidence-driven tone over hype-heavy SaaS copy.</li>
+            <li>Visual language should feel bright, trustworthy, and deliberate.</li>
+          </ul>
+        </article>
+        <article className="marketing-card docs-card">
+          <h2>Design rules</h2>
+          <ul className="marketing-list">
+            <li>Use layered light backgrounds, deep blue anchors, and green support accents.</li>
+            <li>Prefer expressive serif headlines plus clean sans-serif UI pairing.</li>
+            <li>Use illustrations and structured layouts instead of generic stock-photo patterns.</li>
+          </ul>
+        </article>
+      </section>
+    </>
+  );
+}
+
 function renderContent(path: string, onNavigate: NavigateFn): JSX.Element {
   switch (path) {
     case '/':
@@ -870,6 +998,8 @@ function renderContent(path: string, onNavigate: NavigateFn): JSX.Element {
       return renderDocsApi();
     case '/docs/integrations':
       return renderDocsIntegrations();
+    case '/docs/brand':
+      return renderDocsBrand();
     default:
       if (path.startsWith('/blog/')) {
         return renderBlogPost(path, onNavigate);

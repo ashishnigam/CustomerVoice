@@ -112,6 +112,11 @@ type Session = {
   accessToken: string;
 };
 
+type PortalAppProps = {
+  path: string;
+  onNavigate: (path: string) => void;
+};
+
 const defaultApiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1';
 const defaultWorkspaceId = '22222222-2222-2222-2222-222222222222';
 const defaultUserId = '33333333-3333-3333-3333-333333333333';
@@ -205,7 +210,20 @@ function isRoleAllowed(role: Role, allowedRoles: Role[]): boolean {
   return allowedRoles.includes(role);
 }
 
-export function PortalApp(): JSX.Element {
+function getBoardSlugFromPath(path: string): string | null {
+  const match = path.match(/^\/app\/boards\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getShareableBoardSlug(slug: string): string {
+  return slug.replace(/-[0-9a-f]{8}$/, '');
+}
+
+function buildBoardPath(slug: string): string {
+  return `/app/boards/${slug}`;
+}
+
+export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   const [apiBase, setApiBase] = useState(defaultApiBase);
 
   const [workspaceOptions, setWorkspaceOptions] = useState<string[]>([defaultWorkspaceId]);
@@ -289,9 +307,11 @@ export function PortalApp(): JSX.Element {
 
   const [outreachSubject, setOutreachSubject] = useState('');
   const [outreachMessage, setOutreachMessage] = useState('');
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
 
   const baseUrl = useMemo(() => apiBase.replace(/\/+$/, ''), [apiBase]);
   const headers = useMemo(() => (session ? requestHeaders(session) : null), [session]);
+  const routeBoardSlug = useMemo(() => getBoardSlugFromPath(path), [path]);
 
   const selectedBoard = useMemo(
     () => boards.find((board) => board.id === selectedBoardId) ?? null,
@@ -306,6 +326,21 @@ export function PortalApp(): JSX.Element {
   const selectedAnalyticsIdea = useMemo(
     () => analyticsItems.find((item) => item.ideaId === selectedAnalyticsIdeaId) ?? null,
     [analyticsItems, selectedAnalyticsIdeaId],
+  );
+  const customerBoardUrl = useMemo(
+    () =>
+      selectedBoard
+        ? `${window.location.origin}${buildBoardPath(getShareableBoardSlug(selectedBoard.slug))}`
+        : null,
+    [selectedBoard],
+  );
+  const openIdeaCount = useMemo(
+    () => ideas.filter((idea) => !['completed', 'declined'].includes(idea.status)).length,
+    [ideas],
+  );
+  const boardVoteCount = useMemo(
+    () => ideas.reduce((total, idea) => total + idea.voteCount, 0),
+    [ideas],
   );
 
   const canManageStatus = session ? rolesThatCanManageStatus.has(session.role) : false;
@@ -400,9 +435,19 @@ export function PortalApp(): JSX.Element {
       if (data.items.length === 0) {
         setSelectedBoardId(null);
       } else {
-        setSelectedBoardId((current) =>
-          current && data.items.some((item) => item.id === current) ? current : data.items[0].id,
-        );
+        const routeBoard = routeBoardSlug
+          ? data.items.find(
+              (item) => item.slug === routeBoardSlug || getShareableBoardSlug(item.slug) === routeBoardSlug,
+            ) ?? null
+          : null;
+
+        if (routeBoard) {
+          setSelectedBoardId(routeBoard.id);
+        } else {
+          setSelectedBoardId((current) =>
+            current && data.items.some((item) => item.id === current) ? current : data.items[0].id,
+          );
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'unauthorized') return;
@@ -410,7 +455,7 @@ export function PortalApp(): JSX.Element {
     } finally {
       setBoardsLoading(false);
     }
-  }, [apiRequest, session]);
+  }, [apiRequest, routeBoardSlug, session]);
 
   const loadCategories = useCallback(async () => {
     if (!session) return;
@@ -544,6 +589,42 @@ export function PortalApp(): JSX.Element {
   }, [session, loadBoards, loadCategories]);
 
   useEffect(() => {
+    if (routeBoardSlug) {
+      setTab('portal');
+    }
+  }, [routeBoardSlug]);
+
+  useEffect(() => {
+    if (!routeBoardSlug || boards.length === 0) return;
+
+    const matchedBoard =
+      boards.find(
+        (board) => board.slug === routeBoardSlug || getShareableBoardSlug(board.slug) === routeBoardSlug,
+      ) ?? null;
+    if (!matchedBoard) {
+      setBoardsError(`Board slug "${routeBoardSlug}" was not found in this workspace.`);
+      return;
+    }
+
+    setBoardsError((current) =>
+      current?.includes('was not found in this workspace') ? null : current,
+    );
+    if (matchedBoard.id !== selectedBoardId) {
+      setSelectedBoardId(matchedBoard.id);
+    }
+  }, [boards, routeBoardSlug, selectedBoardId]);
+
+  useEffect(() => {
+    if (!selectedBoard) return;
+    if (tab !== 'portal') return;
+
+    const nextPath = buildBoardPath(getShareableBoardSlug(selectedBoard.slug));
+    if (path !== nextPath) {
+      onNavigate(nextPath);
+    }
+  }, [onNavigate, path, selectedBoard, tab]);
+
+  useEffect(() => {
     if (!session || !selectedBoardId) {
       setIdeas([]);
       return;
@@ -581,6 +662,10 @@ export function PortalApp(): JSX.Element {
       `Thanks for your feedback on "${selectedAnalyticsIdea.title}". We wanted to share an update.`,
     );
   }, [selectedAnalyticsIdea]);
+
+  useEffect(() => {
+    setShareNotice(null);
+  }, [selectedBoardId]);
 
   const onSignIn = useCallback(
     (event: FormEvent) => {
@@ -625,9 +710,33 @@ export function PortalApp(): JSX.Element {
       clearWorkspaceView();
       setSession({ ...session, workspaceId: nextWorkspaceId });
       setWorkspaceIdInput(nextWorkspaceId);
+      onNavigate('/app');
     },
-    [clearWorkspaceView, session],
+    [clearWorkspaceView, onNavigate, session],
   );
+
+  const onSelectBoard = useCallback(
+    (boardId: string) => {
+      setSelectedBoardId(boardId);
+      const board = boards.find((item) => item.id === boardId) ?? null;
+      if (board) {
+        setTab('portal');
+        onNavigate(buildBoardPath(getShareableBoardSlug(board.slug)));
+      }
+    },
+    [boards, onNavigate],
+  );
+
+  const onCopyBoardLink = useCallback(async () => {
+    if (!customerBoardUrl) return;
+
+    try {
+      await navigator.clipboard.writeText(customerBoardUrl);
+      setShareNotice('Board link copied.');
+    } catch {
+      setShareNotice(customerBoardUrl);
+    }
+  }, [customerBoardUrl]);
 
   const onCreateBoard = useCallback(
     async (event: FormEvent) => {
@@ -656,6 +765,8 @@ export function PortalApp(): JSX.Element {
         setBoardVisibility('public');
         await loadBoards();
         setSelectedBoardId(created.id);
+        setTab('portal');
+        onNavigate(buildBoardPath(getShareableBoardSlug(created.slug)));
       } catch (error) {
         if (error instanceof Error && error.message === 'unauthorized') return;
         setBoardsError(error instanceof Error ? error.message : 'board_create_failed');
@@ -663,7 +774,7 @@ export function PortalApp(): JSX.Element {
         setBoardCreateBusy(false);
       }
     },
-    [apiRequest, boardDescription, boardName, boardVisibility, loadBoards, session],
+    [apiRequest, boardDescription, boardName, boardVisibility, loadBoards, onNavigate, session],
   );
 
   const onCreateCategory = useCallback(
@@ -1101,11 +1212,22 @@ export function PortalApp(): JSX.Element {
       <section className="panel">
         <header className="topbar">
           <div>
-            <p className="eyebrow">CustomerVoice v1</p>
-            <h1>Feedback Portal + Moderation + Analytics</h1>
-            <p className="subtitle">CV-014 to CV-022 implementation shell.</p>
+            <p className="eyebrow">CustomerVoice Workspace</p>
+            <h1>Configure boards, then share a customer-facing request portal.</h1>
+            <p className="subtitle">
+              Boards and categories are setup layers. The real surface customers should experience is the shareable
+              board view.
+            </p>
           </div>
           <div className="topbar-actions">
+            {selectedBoard ? (
+              <button
+                className="secondary"
+                onClick={() => onNavigate(buildBoardPath(getShareableBoardSlug(selectedBoard.slug)))}
+              >
+                Open Board Route
+              </button>
+            ) : null}
             <button onClick={() => void Promise.all([loadBoards(), loadCategories()])} disabled={boardsLoading}>
               Refresh
             </button>
@@ -1133,6 +1255,10 @@ export function PortalApp(): JSX.Element {
           <label>
             User
             <input value={`${session.userEmail} (${session.role})`} readOnly />
+          </label>
+          <label>
+            Current Board URL
+            <input value={customerBoardUrl ?? 'Create or select a board to generate a route'} readOnly />
           </label>
         </section>
 
@@ -1164,272 +1290,426 @@ export function PortalApp(): JSX.Element {
         {analyticsError ? <p className="notice error">{analyticsError}</p> : null}
 
         {tab === 'portal' ? (
-          <section className="layout-grid layout-portal">
-            <article className="card">
-              <h2>Boards</h2>
-              <ul className="list selectable">
-                {boards.length === 0 ? <li className="empty">No boards yet.</li> : null}
-                {boards.map((board) => (
-                  <li key={board.id}>
-                    <button
-                      className={selectedBoardId === board.id ? 'selected' : ''}
-                      onClick={() => setSelectedBoardId(board.id)}
-                    >
-                      <strong>{board.name}</strong>
-                      <span>{board.visibility}</span>
-                      <small>{board.slug}</small>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+          <section className="board-shell">
+            <aside className="board-sidebar">
+              <article className="card board-directory-card">
+                <p className="eyebrow">Board Directory</p>
+                <h2>Choose the board customers should land on.</h2>
+                <p className="subtitle">
+                  Every board becomes a shareable route. Select the board you want to configure or preview.
+                </p>
+                <ul className="list selectable board-directory-list">
+                  {boards.length === 0 ? <li className="empty">No boards yet.</li> : null}
+                  {boards.map((board) => (
+                    <li key={board.id}>
+                      <button
+                        className={selectedBoardId === board.id ? 'selected' : ''}
+                        onClick={() => onSelectBoard(board.id)}
+                      >
+                        <strong>{board.name}</strong>
+                        <span>{board.visibility === 'public' ? 'Public board' : 'Private board'}</span>
+                        <small>{buildBoardPath(getShareableBoardSlug(board.slug))}</small>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </article>
 
-              <form className="stack" onSubmit={onCreateBoard}>
-                <h3>Create Board</h3>
-                <label>
-                  Name
-                  <input value={boardName} onChange={(event) => setBoardName(event.target.value)} />
-                </label>
-                <label>
-                  Description
-                  <textarea
-                    rows={3}
-                    value={boardDescription}
-                    onChange={(event) => setBoardDescription(event.target.value)}
-                  />
-                </label>
-                <label>
-                  Visibility
-                  <select
-                    value={boardVisibility}
-                    onChange={(event) => setBoardVisibility(event.target.value as 'public' | 'private')}
-                  >
-                    <option value="public">public</option>
-                    <option value="private">private</option>
-                  </select>
-                </label>
-                <button type="submit" disabled={boardCreateBusy}>
-                  {boardCreateBusy ? 'Creating...' : 'Create Board'}
-                </button>
-              </form>
-            </article>
+              <article className="card board-config-card">
+                <p className="eyebrow">Board Setup</p>
+                <h2>{selectedBoard ? `${selectedBoard.name} configuration` : 'Create your first board'}</h2>
+                <p className="subtitle">
+                  Create the board once, define the categories, then use the board route as the customer-facing request
+                  portal.
+                </p>
 
-            <article className="card">
-              <h2>Categories</h2>
-              {categoriesLoading ? <p>Loading categories...</p> : null}
-              <ul className="list compact-list">
-                {categories.length === 0 ? <li className="empty">No categories yet.</li> : null}
-                {categories.map((category) => (
-                  <li key={category.id}>
-                    <span className="category-dot" style={{ background: category.colorHex ?? '#4E84C4' }} />
-                    <span>{category.name}</span>
-                  </li>
-                ))}
-              </ul>
-              <form className="stack" onSubmit={onCreateCategory}>
-                <h3>Create Category</h3>
-                <label>
-                  Name
-                  <input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} />
-                </label>
-                <label>
-                  Color Hex
-                  <input
-                    value={categoryColorHex}
-                    onChange={(event) => setCategoryColorHex(event.target.value)}
-                    placeholder="#4E84C4"
-                  />
-                </label>
-                <button type="submit" disabled={categoryBusy}>
-                  {categoryBusy ? 'Creating...' : 'Create Category'}
-                </button>
-              </form>
-            </article>
-
-            <article className="card">
-              <h2>Ideas {selectedBoard ? `for ${selectedBoard.name}` : ''}</h2>
-              <div className="filter-grid">
-                <label>
-                  Search
-                  <input
-                    value={ideaSearch}
-                    onChange={(event) => setIdeaSearch(event.target.value)}
-                    placeholder="Search ideas"
-                  />
-                </label>
-                <label>
-                  Status
-                  <select
-                    value={ideaStatusFilter}
-                    onChange={(event) => setIdeaStatusFilter(event.target.value as 'all' | IdeaStatus)}
-                  >
-                    <option value="all">all</option>
-                    {ideaStatusValues.map((status) => (
-                      <option key={status} value={status}>
-                        {statusLabel[status]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Category
-                  <select
-                    value={ideaCategoryFilter}
-                    onChange={(event) => setIdeaCategoryFilter(event.target.value as 'all' | string)}
-                  >
-                    <option value="all">all</option>
-                    {categories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Sort
-                  <select value={ideaSort} onChange={(event) => setIdeaSort(event.target.value as IdeaSortMode)}>
-                    {sortModes.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {mode}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              {ideasLoading ? <p>Loading ideas...</p> : null}
-              <ul className="list selectable ideas-list">
-                {selectedBoard && ideas.length === 0 && !ideasLoading ? (
-                  <li className="empty">No ideas found for current filters.</li>
-                ) : null}
-                {ideas.map((idea) => (
-                  <li key={idea.id}>
-                    <button
-                      className={selectedIdeaId === idea.id ? 'selected' : ''}
-                      onClick={() => setSelectedIdeaId(idea.id)}
-                    >
-                      <strong>{idea.title}</strong>
-                      <div className="status-row">
-                        <span className={statusClassName[idea.status]}>{statusLabel[idea.status]}</span>
-                        <span className={moderationClassName[idea.moderationState]}>
-                          {moderationLabel[idea.moderationState]}
-                        </span>
+                {selectedBoard ? (
+                  <div className="board-share-panel">
+                    <label>
+                      Canonical Board Route
+                      <input value={customerBoardUrl ?? ''} readOnly />
+                    </label>
+                    <div className="button-row">
+                      <button type="button" onClick={() => void onCopyBoardLink()}>
+                        Copy Board Link
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() =>
+                          onNavigate(buildBoardPath(getShareableBoardSlug(selectedBoard.slug)))
+                        }
+                      >
+                        Open Board Preview
+                      </button>
+                    </div>
+                    {shareNotice ? <p className="inline-note">{shareNotice}</p> : null}
+                    <div className="board-setup-stats">
+                      <div>
+                        <strong>{selectedBoard.visibility}</strong>
+                        <span>visibility</span>
                       </div>
-                      <small>
-                        {idea.voteCount} votes · {idea.commentCount} comments
-                        {idea.categoryNames.length > 0 ? ` · ${idea.categoryNames.join(', ')}` : ''}
-                      </small>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                      <div>
+                        <strong>{categories.length}</strong>
+                        <span>categories</span>
+                      </div>
+                      <div>
+                        <strong>{ideas.length}</strong>
+                        <span>visible ideas</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
-              {selectedBoard ? (
-                <form className="stack" onSubmit={onCreateIdea}>
-                  <h3>Create Idea</h3>
+                <form className="stack" onSubmit={onCreateBoard}>
+                  <h3>Create Board</h3>
                   <label>
-                    Title
-                    <input value={ideaTitle} onChange={(event) => setIdeaTitle(event.target.value)} />
+                    Name
+                    <input value={boardName} onChange={(event) => setBoardName(event.target.value)} />
                   </label>
                   <label>
                     Description
                     <textarea
-                      rows={4}
-                      value={ideaDescription}
-                      onChange={(event) => setIdeaDescription(event.target.value)}
+                      rows={3}
+                      value={boardDescription}
+                      onChange={(event) => setBoardDescription(event.target.value)}
+                      placeholder="Explain what customers should submit and what this board covers."
                     />
                   </label>
-                  {categories.length > 0 ? (
-                    <fieldset className="category-select-grid">
-                      <legend>Categories</legend>
-                      {categories.map((category) => (
-                        <label key={category.id} className="checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={ideaCategoryDraft.includes(category.id)}
-                            onChange={() => onToggleIdeaCategoryDraft(category.id)}
-                          />
-                          <span>{category.name}</span>
-                        </label>
-                      ))}
-                    </fieldset>
-                  ) : null}
-                  <button type="submit" disabled={ideaCreateBusy}>
-                    {ideaCreateBusy ? 'Creating...' : 'Create Idea'}
+                  <label>
+                    Visibility
+                    <select
+                      value={boardVisibility}
+                      onChange={(event) => setBoardVisibility(event.target.value as 'public' | 'private')}
+                    >
+                      <option value="public">public</option>
+                      <option value="private">private</option>
+                    </select>
+                  </label>
+                  <button type="submit" disabled={boardCreateBusy}>
+                    {boardCreateBusy ? 'Creating...' : 'Create Board'}
                   </button>
                 </form>
-              ) : null}
-            </article>
+              </article>
 
-            <article className="card detail-card">
-              <h2>Idea Detail</h2>
-              {!selectedIdea ? <p className="empty">Select an idea to view details.</p> : null}
-              {selectedIdea ? (
+              <article className="card category-config-card">
+                <p className="eyebrow">Category Setup</p>
+                <h2>Structure the request intake.</h2>
+                {categoriesLoading ? <p>Loading categories...</p> : null}
+                <ul className="list compact-list category-list">
+                  {categories.length === 0 ? <li className="empty">No categories yet.</li> : null}
+                  {categories.map((category) => (
+                    <li key={category.id}>
+                      <span className="category-dot" style={{ background: category.colorHex ?? '#4E84C4' }} />
+                      <span>{category.name}</span>
+                    </li>
+                  ))}
+                </ul>
+                <form className="stack" onSubmit={onCreateCategory}>
+                  <h3>Create Category</h3>
+                  <label>
+                    Name
+                    <input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} />
+                  </label>
+                  <label>
+                    Color Hex
+                    <input
+                      value={categoryColorHex}
+                      onChange={(event) => setCategoryColorHex(event.target.value)}
+                      placeholder="#4E84C4"
+                    />
+                  </label>
+                  <button type="submit" disabled={categoryBusy}>
+                    {categoryBusy ? 'Creating...' : 'Create Category'}
+                  </button>
+                </form>
+              </article>
+            </aside>
+
+            <section className="board-main">
+              {selectedBoard ? (
                 <>
-                  <h3>{selectedIdea.title}</h3>
-                  <p>{selectedIdea.description}</p>
-                  <p className="meta-row">
-                    <span className={statusClassName[selectedIdea.status]}>
-                      {statusLabel[selectedIdea.status]}
-                    </span>
-                    <span className={moderationClassName[selectedIdea.moderationState]}>
-                      {moderationLabel[selectedIdea.moderationState]}
-                    </span>
-                    <span>{selectedIdea.voteCount} votes</span>
-                    <span>{selectedIdea.commentCount} comments</span>
-                    <span>Updated {formatDate(selectedIdea.updatedAt)}</span>
-                  </p>
+                  <article className="board-hero-card">
+                    <div>
+                      <p className="eyebrow">Customer Board Preview</p>
+                      <h2>{selectedBoard.name}</h2>
+                      <p className="subtitle">
+                        {selectedBoard.description && selectedBoard.description.trim().length > 0
+                          ? selectedBoard.description
+                          : 'Use this board to collect feature requests, let customers vote, and keep roadmap decisions visible.'}
+                      </p>
+                    </div>
+                    <div className="board-hero-actions">
+                      <div className="board-hero-route">
+                        <span>Shareable route</span>
+                        <strong>{buildBoardPath(getShareableBoardSlug(selectedBoard.slug))}</strong>
+                      </div>
+                      <div className="button-row">
+                        <button type="button" onClick={() => void onCopyBoardLink()}>
+                          Copy Link
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() =>
+                            onNavigate(buildBoardPath(getShareableBoardSlug(selectedBoard.slug)))
+                          }
+                        >
+                          Stay On Board Route
+                        </button>
+                      </div>
+                    </div>
+                    <div className="board-hero-metrics">
+                      <div>
+                        <strong>{ideas.length}</strong>
+                        <span>visible requests</span>
+                      </div>
+                      <div>
+                        <strong>{openIdeaCount}</strong>
+                        <span>open items</span>
+                      </div>
+                      <div>
+                        <strong>{boardVoteCount}</strong>
+                        <span>total votes</span>
+                      </div>
+                      <div>
+                        <strong>{categories.length}</strong>
+                        <span>category filters</span>
+                      </div>
+                    </div>
+                  </article>
 
-                  <div className="button-row">
-                    <button onClick={() => void onToggleVote()}>
-                      {selectedIdea.viewerHasVoted ? 'Remove Vote' : 'Upvote Idea'}
-                    </button>
-                    {canManageStatus ? (
-                      <select
-                        value={selectedIdea.status}
-                        disabled={statusBusy}
-                        onChange={(event) => void onUpdateStatus(event.target.value as IdeaStatus)}
-                      >
-                        {ideaStatusValues.map((status) => (
-                          <option key={status} value={status}>
-                            {statusLabel[status]}
-                          </option>
-                        ))}
-                      </select>
-                    ) : null}
-                  </div>
-
-                  <h4>Comments</h4>
-                  {selectedIdea.commentsLocked ? <p className="locked-note">Comments are locked by moderation.</p> : null}
-                  {commentsLoading ? <p>Loading comments...</p> : null}
-                  <ul className="list comments">
-                    {comments.length === 0 && !commentsLoading ? <li className="empty">No comments yet.</li> : null}
-                    {comments.map((comment) => (
-                      <li key={comment.id}>
-                        <p>{comment.body}</p>
-                        <small>
-                          {comment.userEmail} · {formatDate(comment.createdAt)}
+                  <div className="board-preview-grid">
+                    <article className="card board-ideas-card">
+                      <div className="section-heading-row">
+                        <div>
+                          <p className="eyebrow">Customer Experience</p>
+                          <h2>Feature requests, voting, and discovery</h2>
+                        </div>
+                        <small className="route-chip">
+                          {buildBoardPath(getShareableBoardSlug(selectedBoard.slug))}
                         </small>
-                      </li>
-                    ))}
-                  </ul>
+                      </div>
 
-                  <form className="stack" onSubmit={onCreateComment}>
-                    <label>
-                      Add Comment
-                      <textarea
-                        rows={3}
-                        value={commentBody}
-                        onChange={(event) => setCommentBody(event.target.value)}
-                        disabled={selectedIdea.commentsLocked}
-                      />
-                    </label>
-                    <button type="submit" disabled={commentBusy || selectedIdea.commentsLocked}>
-                      {commentBusy ? 'Posting...' : 'Post Comment'}
-                    </button>
-                  </form>
+                      <div className="filter-grid">
+                        <label>
+                          Search
+                          <input
+                            value={ideaSearch}
+                            onChange={(event) => setIdeaSearch(event.target.value)}
+                            placeholder="Search ideas"
+                          />
+                        </label>
+                        <label>
+                          Status
+                          <select
+                            value={ideaStatusFilter}
+                            onChange={(event) => setIdeaStatusFilter(event.target.value as 'all' | IdeaStatus)}
+                          >
+                            <option value="all">all</option>
+                            {ideaStatusValues.map((status) => (
+                              <option key={status} value={status}>
+                                {statusLabel[status]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Category
+                          <select
+                            value={ideaCategoryFilter}
+                            onChange={(event) => setIdeaCategoryFilter(event.target.value as 'all' | string)}
+                          >
+                            <option value="all">all</option>
+                            {categories.map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Sort
+                          <select value={ideaSort} onChange={(event) => setIdeaSort(event.target.value as IdeaSortMode)}>
+                            {sortModes.map((mode) => (
+                              <option key={mode} value={mode}>
+                                {mode}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      {ideasLoading ? <p>Loading ideas...</p> : null}
+                      <ul className="list selectable ideas-list board-idea-list">
+                        {selectedBoard && ideas.length === 0 && !ideasLoading ? (
+                          <li className="empty">No ideas found for current filters.</li>
+                        ) : null}
+                        {ideas.map((idea) => (
+                          <li key={idea.id}>
+                            <button
+                              className={selectedIdeaId === idea.id ? 'selected' : ''}
+                              onClick={() => setSelectedIdeaId(idea.id)}
+                            >
+                              <div className="idea-card-topline">
+                                <strong>{idea.title}</strong>
+                                <span className="vote-pill">{idea.voteCount} votes</span>
+                              </div>
+                              <p className="idea-excerpt">{idea.description}</p>
+                              <div className="status-row">
+                                <span className={statusClassName[idea.status]}>{statusLabel[idea.status]}</span>
+                                <span className={moderationClassName[idea.moderationState]}>
+                                  {moderationLabel[idea.moderationState]}
+                                </span>
+                              </div>
+                              {idea.categoryNames.length > 0 ? (
+                                <div className="pill-row">
+                                  {idea.categoryNames.map((categoryName) => (
+                                    <span className="category-pill" key={`${idea.id}-${categoryName}`}>
+                                      {categoryName}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                              <small>{idea.commentCount} comments · updated {formatDate(idea.updatedAt)}</small>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+
+                      <form className="stack board-submit-form" onSubmit={onCreateIdea}>
+                        <h3>Submit a feature request</h3>
+                        <label>
+                          Title
+                          <input value={ideaTitle} onChange={(event) => setIdeaTitle(event.target.value)} />
+                        </label>
+                        <label>
+                          Description
+                          <textarea
+                            rows={4}
+                            value={ideaDescription}
+                            onChange={(event) => setIdeaDescription(event.target.value)}
+                            placeholder="Describe the user problem, desired outcome, and any business impact."
+                          />
+                        </label>
+                        {categories.length > 0 ? (
+                          <fieldset className="category-select-grid">
+                            <legend>Categories</legend>
+                            {categories.map((category) => (
+                              <label key={category.id} className="checkbox-row">
+                                <input
+                                  type="checkbox"
+                                  checked={ideaCategoryDraft.includes(category.id)}
+                                  onChange={() => onToggleIdeaCategoryDraft(category.id)}
+                                />
+                                <span>{category.name}</span>
+                              </label>
+                            ))}
+                          </fieldset>
+                        ) : null}
+                        <button type="submit" disabled={ideaCreateBusy}>
+                          {ideaCreateBusy ? 'Submitting...' : 'Submit Idea'}
+                        </button>
+                      </form>
+                    </article>
+
+                    <article className="card detail-card board-detail-card">
+                      <p className="eyebrow">Idea Detail</p>
+                      {!selectedIdea ? <p className="empty">Select an idea to view details.</p> : null}
+                      {selectedIdea ? (
+                        <>
+                          <h2>{selectedIdea.title}</h2>
+                          <p>{selectedIdea.description}</p>
+                          <p className="meta-row">
+                            <span className={statusClassName[selectedIdea.status]}>
+                              {statusLabel[selectedIdea.status]}
+                            </span>
+                            <span className={moderationClassName[selectedIdea.moderationState]}>
+                              {moderationLabel[selectedIdea.moderationState]}
+                            </span>
+                            <span>{selectedIdea.voteCount} votes</span>
+                            <span>{selectedIdea.commentCount} comments</span>
+                            <span>Updated {formatDate(selectedIdea.updatedAt)}</span>
+                          </p>
+
+                          {selectedIdea.categoryNames.length > 0 ? (
+                            <div className="pill-row">
+                              {selectedIdea.categoryNames.map((categoryName) => (
+                                <span className="category-pill" key={`detail-${categoryName}`}>
+                                  {categoryName}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+
+                          <div className="button-row">
+                            <button onClick={() => void onToggleVote()}>
+                              {selectedIdea.viewerHasVoted ? 'Remove Vote' : 'Upvote Idea'}
+                            </button>
+                            {canManageStatus ? (
+                              <select
+                                value={selectedIdea.status}
+                                disabled={statusBusy}
+                                onChange={(event) => void onUpdateStatus(event.target.value as IdeaStatus)}
+                              >
+                                {ideaStatusValues.map((status) => (
+                                  <option key={status} value={status}>
+                                    {statusLabel[status]}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : null}
+                          </div>
+
+                          <h3>Comments</h3>
+                          {selectedIdea.commentsLocked ? (
+                            <p className="locked-note">Comments are locked by moderation.</p>
+                          ) : null}
+                          {commentsLoading ? <p>Loading comments...</p> : null}
+                          <ul className="list comments">
+                            {comments.length === 0 && !commentsLoading ? (
+                              <li className="empty">No comments yet.</li>
+                            ) : null}
+                            {comments.map((comment) => (
+                              <li key={comment.id}>
+                                <p>{comment.body}</p>
+                                <small>
+                                  {comment.userEmail} · {formatDate(comment.createdAt)}
+                                </small>
+                              </li>
+                            ))}
+                          </ul>
+
+                          <form className="stack" onSubmit={onCreateComment}>
+                            <label>
+                              Add Comment
+                              <textarea
+                                rows={3}
+                                value={commentBody}
+                                onChange={(event) => setCommentBody(event.target.value)}
+                                disabled={selectedIdea.commentsLocked}
+                              />
+                            </label>
+                            <button type="submit" disabled={commentBusy || selectedIdea.commentsLocked}>
+                              {commentBusy ? 'Posting...' : 'Post Comment'}
+                            </button>
+                          </form>
+                        </>
+                      ) : null}
+                    </article>
+                  </div>
                 </>
-              ) : null}
-            </article>
+              ) : (
+                <article className="card board-empty-state">
+                  <p className="eyebrow">Start Here</p>
+                  <h2>Create a board first.</h2>
+                  <p className="subtitle">
+                    Once a board exists, CustomerVoice will generate a canonical board route that you can bookmark,
+                    share, and use as the main customer-facing request experience.
+                  </p>
+                </article>
+              )}
+            </section>
           </section>
         ) : null}
 

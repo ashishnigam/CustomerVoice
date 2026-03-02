@@ -425,6 +425,33 @@ function slugify(value: string): string {
   return base.length > 0 ? base : `board-${uuidv4().slice(0, 8)}`;
 }
 
+async function generateUniqueBoardSlug(workspaceId: string, name: string): Promise<string> {
+  const baseSlug = slugify(name);
+  const existing = await query<{ slug: string }>(
+    `
+      SELECT slug
+      FROM boards
+      WHERE workspace_id = $1
+        AND (slug = $2 OR slug LIKE $3)
+    `,
+    [workspaceId, baseSlug, `${baseSlug}-%`],
+  );
+
+  const existingSlugs = new Set(existing.rows.map((row) => row.slug));
+  if (existingSlugs.size === 0) {
+    return baseSlug;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseSlug}-${suffix}`;
+  while (existingSlugs.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseSlug}-${suffix}`;
+  }
+
+  return candidate;
+}
+
 async function ensureUserWithClient(
   client: { query: (text: string, params?: unknown[]) => Promise<unknown> },
   params: { userId: string; email: string; displayName?: string },
@@ -534,7 +561,7 @@ export async function createBoard(params: {
   createdBy: string;
 }): Promise<BoardRecord> {
   const id = uuidv4();
-  const slug = `${slugify(params.name)}-${id.slice(0, 8)}`;
+  const slug = await generateUniqueBoardSlug(params.workspaceId, params.name);
   const result = await query<BoardRow>(
     `
       INSERT INTO boards (id, workspace_id, slug, name, description, visibility, active, created_by)
