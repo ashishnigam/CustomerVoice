@@ -61,8 +61,14 @@ services:
     command: sh -c "corepack enable && pnpm --filter @customervoice/worker dev"
     environment:
       REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/customervoice
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      WORKER_FROM_EMAIL: notifications@customervoice.local
     depends_on:
       - redis
+      - postgres
+      - mailhog
 
   web:
     image: node:20-alpine

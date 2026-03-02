@@ -34,6 +34,7 @@
 ### CV-014
 - Title: Extend ideas query API with search/sort/filter primitives
 - Release target: V1
+- Status: Completed
 - Owner: Backend A
 - Estimate: 5
 - Dependencies: CV-012, CV-013
@@ -47,6 +48,7 @@ Add server-side query support for status, category, keyword search, and sort mod
 ### CV-015
 - Title: Add idea category taxonomy and tagging model
 - Release target: V1
+- Status: Completed
 - Owner: Backend B
 - Estimate: 5
 - Dependencies: CV-014
@@ -60,6 +62,7 @@ Introduce workspace-level categories and idea-category linkage for portal filter
 ### CV-016
 - Title: Ship portal search/sort/filter UX parity
 - Release target: V1
+- Status: Completed
 - Owner: Frontend
 - Estimate: 5
 - Dependencies: CV-014, CV-015
@@ -73,6 +76,7 @@ Implement search, status chips, category filter, and sort selector in board/idea
 ### CV-017
 - Title: Moderation action APIs (merge duplicate, mark spam, lock comments)
 - Release target: V1
+- Status: Completed
 - Owner: Backend B
 - Estimate: 8
 - Dependencies: CV-015
@@ -86,6 +90,7 @@ Add moderation command endpoints and audit events for portal hygiene and PM tria
 ### CV-018
 - Title: Moderation queue UX with bulk actions
 - Release target: V1
+- Status: Completed
 - Owner: Frontend
 - Estimate: 5
 - Dependencies: CV-017
@@ -99,6 +104,7 @@ Create internal moderation panel for filtering noisy ideas and executing moderat
 ### CV-019
 - Title: Notification event model and audience resolver
 - Release target: V1
+- Status: Completed
 - Owner: Backend A
 - Estimate: 5
 - Dependencies: CV-017
@@ -112,6 +118,7 @@ Define event model for idea status transition notifications and resolve audience
 ### CV-020
 - Title: Email templates and worker dispatch for shipped ideas
 - Release target: V1
+- Status: Completed
 - Owner: Backend A
 - Estimate: 5
 - Dependencies: CV-019
@@ -125,6 +132,7 @@ Implement worker job for outbound email notifications on shipped ideas with retr
 ### CV-021
 - Title: Build analytics scoring engine (RICE + revenue potential)
 - Release target: V1
+- Status: Completed
 - Owner: Backend B
 - Estimate: 8
 - Dependencies: CV-014, CV-015
@@ -138,6 +146,7 @@ Create analytics service to compute RICE and revenue potential metrics per idea 
 ### CV-022
 - Title: Internal analytics dashboard and outreach panel UX
 - Release target: V1
+- Status: Completed
 - Owner: Frontend
 - Estimate: 8
 - Dependencies: CV-021
@@ -151,6 +160,7 @@ Implement internal dashboard showing ranked ideas, revenue impact, and customer 
 ### CV-023
 - Title: V1 parity QA/UAT and release hardening pass
 - Release target: V1
+- Status: Completed
 - Owner: PM/Designer + Founder
 - Estimate: 3
 - Dependencies: CV-016, CV-018, CV-020, CV-022

@@ -13,8 +13,14 @@
     "test:integration": "echo 'worker integration tests not scaffolded yet'",
     "test:e2e": "echo 'worker e2e tests not scaffolded yet'"
   },
+  "dependencies": {
+    "nodemailer": "^7.0.10",
+    "pg": "^8.13.1"
+  },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/nodemailer": "^6.4.18",
+    "@types/pg": "^8.11.10",
     "eslint": "^9.17.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
