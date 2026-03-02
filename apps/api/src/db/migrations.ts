@@ -24,6 +24,8 @@ const ideaStatuses = [
   "'declined'",
 ].join(',');
 
+const moderationStates = ["'normal'", "'spam'", "'merged'"].join(',');
+
 const migrations: Migration[] = [
   {
     id: '001_initial_schema',
@@ -155,6 +157,106 @@ const migrations: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_idea_comments_workspace_idea
         ON idea_comments (workspace_id, idea_id, created_at DESC);
+    `,
+  },
+  {
+    id: '004_v1_portal_polish_schema',
+    sql: `
+      ALTER TABLE ideas
+      ADD COLUMN IF NOT EXISTS moderation_state TEXT NOT NULL DEFAULT 'normal' CHECK (moderation_state IN (${moderationStates}));
+
+      ALTER TABLE ideas
+      ADD COLUMN IF NOT EXISTS comments_locked BOOLEAN NOT NULL DEFAULT FALSE;
+
+      ALTER TABLE ideas
+      ADD COLUMN IF NOT EXISTS merged_into_idea_id TEXT REFERENCES ideas(id);
+
+      CREATE INDEX IF NOT EXISTS idx_ideas_workspace_moderation_state
+        ON ideas (workspace_id, moderation_state, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS idea_categories (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        color_hex TEXT,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_by TEXT NOT NULL REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (workspace_id, slug)
+      );
+
+      CREATE TABLE IF NOT EXISTS idea_category_links (
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+        category_id TEXT NOT NULL REFERENCES idea_categories(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (idea_id, category_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_idea_category_links_workspace_idea
+        ON idea_category_links (workspace_id, idea_id);
+
+      CREATE INDEX IF NOT EXISTS idx_idea_category_links_workspace_category
+        ON idea_category_links (workspace_id, category_id);
+
+      CREATE TABLE IF NOT EXISTS idea_scoring_inputs (
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+        reach NUMERIC(12, 2) NOT NULL DEFAULT 0,
+        impact NUMERIC(12, 2) NOT NULL DEFAULT 0,
+        confidence NUMERIC(12, 2) NOT NULL DEFAULT 0,
+        effort NUMERIC(12, 2) NOT NULL DEFAULT 1,
+        revenue_potential_usd NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        customer_segment TEXT,
+        customer_count INT NOT NULL DEFAULT 0,
+        updated_by TEXT REFERENCES users(id),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (workspace_id, idea_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_idea_scoring_inputs_workspace_segment
+        ON idea_scoring_inputs (workspace_id, customer_segment);
+
+      CREATE TABLE IF NOT EXISTS notification_jobs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'sent', 'failed', 'dead')),
+        attempt_count INT NOT NULL DEFAULT 0,
+        max_attempts INT NOT NULL DEFAULT 3,
+        recipient_count INT NOT NULL DEFAULT 0,
+        last_error TEXT,
+        created_by TEXT REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        processed_at TIMESTAMPTZ
+      );
+
+      CREATE TABLE IF NOT EXISTS notification_job_recipients (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES notification_jobs(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        user_id TEXT REFERENCES users(id),
+        email TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
+        attempts INT NOT NULL DEFAULT 0,
+        last_error TEXT,
+        sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (job_id, email)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_notification_jobs_workspace_status
+        ON notification_jobs (workspace_id, status, created_at ASC);
+
+      CREATE INDEX IF NOT EXISTS idx_notification_recipients_job_status
+        ON notification_job_recipients (job_id, status, created_at ASC);
     `,
   },
 ];

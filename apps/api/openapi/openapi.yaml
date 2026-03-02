@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CustomerVoice API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: http://localhost:4000/api/v1
 components:
@@ -14,125 +14,127 @@ components:
     Board:
       type: object
       properties:
-        id:
-          type: string
-        workspaceId:
-          type: string
-        slug:
-          type: string
-        name:
-          type: string
+        id: { type: string }
+        workspaceId: { type: string }
+        slug: { type: string }
+        name: { type: string }
         description:
           type: string
           nullable: true
         visibility:
           type: string
           enum: [public, private]
-        active:
-          type: boolean
-        createdBy:
+        active: { type: boolean }
+        createdBy: { type: string }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    IdeaCategory:
+      type: object
+      properties:
+        id: { type: string }
+        workspaceId: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        colorHex:
           type: string
-        createdAt:
-          type: string
-        updatedAt:
-          type: string
-      required:
-        [id, workspaceId, slug, name, visibility, active, createdBy, createdAt, updatedAt]
+          nullable: true
+        active: { type: boolean }
+        createdBy: { type: string }
+        createdAt: { type: string }
+        updatedAt: { type: string }
     Idea:
       type: object
       properties:
-        id:
-          type: string
-        workspaceId:
-          type: string
-        boardId:
-          type: string
-        title:
-          type: string
-        description:
-          type: string
+        id: { type: string }
+        workspaceId: { type: string }
+        boardId: { type: string }
+        title: { type: string }
+        description: { type: string }
         status:
           type: string
           enum: [new, under_review, accepted, planned, in_progress, completed, declined]
-        active:
-          type: boolean
-        createdBy:
+        moderationState:
           type: string
+          enum: [normal, spam, merged]
+        commentsLocked: { type: boolean }
+        mergedIntoIdeaId:
+          type: string
+          nullable: true
+        active: { type: boolean }
+        createdBy: { type: string }
         updatedBy:
           type: string
           nullable: true
-        createdAt:
-          type: string
-        updatedAt:
-          type: string
-        voteCount:
-          type: integer
-        commentCount:
-          type: integer
-        viewerHasVoted:
-          type: boolean
-      required:
-        [id, workspaceId, boardId, title, description, status, active, createdBy, createdAt, updatedAt, voteCount, commentCount, viewerHasVoted]
-    IdeaComment:
-      type: object
-      properties:
-        id:
-          type: string
-        workspaceId:
-          type: string
-        ideaId:
-          type: string
-        userId:
-          type: string
-        userEmail:
-          type: string
-        body:
-          type: string
-        active:
-          type: boolean
-        createdAt:
-          type: string
-        updatedAt:
-          type: string
-      required: [id, workspaceId, ideaId, userId, userEmail, body, active, createdAt, updatedAt]
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        voteCount: { type: integer }
+        commentCount: { type: integer }
+        viewerHasVoted: { type: boolean }
+        categoryIds:
+          type: array
+          items: { type: string }
+        categoryNames:
+          type: array
+          items: { type: string }
+        categorySlugs:
+          type: array
+          items: { type: string }
     IdeaVote:
       type: object
       properties:
-        ideaId:
+        ideaId: { type: string }
+        voteCount: { type: integer }
+        hasVoted: { type: boolean }
+    IdeaComment:
+      type: object
+      properties:
+        id: { type: string }
+        workspaceId: { type: string }
+        ideaId: { type: string }
+        userId: { type: string }
+        userEmail: { type: string }
+        body: { type: string }
+        active: { type: boolean }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    NotificationJobEnqueue:
+      type: object
+      properties:
+        notificationJobId: { type: string }
+        recipientCount: { type: integer }
+    AnalyticsIdea:
+      type: object
+      properties:
+        ideaId: { type: string }
+        boardId: { type: string }
+        title: { type: string }
+        status: { type: string }
+        moderationState: { type: string }
+        voteCount: { type: integer }
+        commentCount: { type: integer }
+        reach: { type: number }
+        impact: { type: number }
+        confidence: { type: number }
+        effort: { type: number }
+        riceScore: { type: number }
+        revenuePotentialUsd: { type: number }
+        customerSegment:
           type: string
-        voteCount:
-          type: integer
-        hasVoted:
-          type: boolean
-      required: [ideaId, voteCount, hasVoted]
+          nullable: true
+        customerCount: { type: integer }
+        contactEmails:
+          type: array
+          items: { type: string }
 security:
   - bearerAuth: []
 paths:
   /workspaces/{workspaceId}/boards:
     get:
-      summary: List boards in a workspace
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: query
-          name: includeInactive
-          required: false
-          schema:
-            type: boolean
+      summary: List boards in workspace
       responses:
-        '200':
-          description: Board list
+        '200': { description: Board list }
     post:
       summary: Create board
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
       responses:
         '201':
           description: Board created
@@ -140,101 +142,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Board'
-  /workspaces/{workspaceId}/boards/{boardId}:
+  /workspaces/{workspaceId}/categories:
     get:
-      summary: Get board by id
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
+      summary: List idea categories
       responses:
-        '200':
-          description: Board details
-    patch:
-      summary: Update board
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
+        '200': { description: Category list }
+    post:
+      summary: Create idea category
       responses:
-        '200':
-          description: Board updated
-  /workspaces/{workspaceId}/boards/{boardId}/ideas:
-    get:
-      summary: List ideas in a board
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
-        - in: query
-          name: status
-          required: false
-          schema:
-            type: string
-            enum: [new, under_review, accepted, planned, in_progress, completed, declined]
-        - in: query
-          name: search
-          required: false
-          schema:
-            type: string
-        - in: query
-          name: includeInactive
-          required: false
-          schema:
-            type: boolean
-        - in: query
-          name: limit
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-      responses:
-        '200':
-          description: Idea list
+        '201':
+          description: Category created
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Idea'
+                $ref: '#/components/schemas/IdeaCategory'
+  /workspaces/{workspaceId}/categories/{categoryId}:
+    patch:
+      summary: Update idea category
+      responses:
+        '200':
+          description: Category updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdeaCategory'
+  /workspaces/{workspaceId}/boards/{boardId}/ideas:
+    get:
+      summary: List ideas with search, sort, status, moderation, and category filters
+      responses:
+        '200': { description: Idea list }
     post:
-      summary: Create idea
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
+      summary: Create idea with optional category tags
       responses:
         '201':
           description: Idea created
@@ -244,75 +182,37 @@ paths:
                 $ref: '#/components/schemas/Idea'
   /workspaces/{workspaceId}/boards/{boardId}/ideas/{ideaId}:
     get:
-      summary: Get idea details
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: ideaId
-          required: true
-          schema:
-            type: string
+      summary: Get idea detail
       responses:
         '200':
-          description: Idea details
+          description: Idea detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Idea'
+  /workspaces/{workspaceId}/boards/{boardId}/ideas/{ideaId}/categories:
+    put:
+      summary: Replace idea category assignments
+      responses:
+        '200':
+          description: Idea with updated categories
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Idea'
   /workspaces/{workspaceId}/boards/{boardId}/ideas/{ideaId}/status:
     patch:
-      summary: Update idea status
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: ideaId
-          required: true
-          schema:
-            type: string
+      summary: Update idea status and enqueue notification when completed
       responses:
         '200':
-          description: Idea status updated
+          description: Idea updated
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Idea'
   /workspaces/{workspaceId}/boards/{boardId}/ideas/{ideaId}/votes:
     post:
-      summary: Vote for an idea
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: ideaId
-          required: true
-          schema:
-            type: string
+      summary: Upvote idea
       responses:
         '200':
           description: Vote state
@@ -321,23 +221,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/IdeaVote'
     delete:
-      summary: Remove vote from an idea
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: ideaId
-          required: true
-          schema:
-            type: string
+      summary: Remove vote
       responses:
         '200':
           description: Vote state
@@ -347,33 +231,61 @@ paths:
                 $ref: '#/components/schemas/IdeaVote'
   /workspaces/{workspaceId}/boards/{boardId}/ideas/{ideaId}/comments:
     get:
-      summary: List comments for an idea
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: ideaId
-          required: true
-          schema:
-            type: string
-        - in: query
-          name: limit
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 300
+      summary: List idea comments
+      responses:
+        '200': { description: Comment list }
+    post:
+      summary: Add idea comment
+      responses:
+        '201':
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdeaComment'
+        '409':
+          description: Comments locked by moderation
+  /workspaces/{workspaceId}/moderation/ideas:
+    get:
+      summary: List moderation queue items
+      responses:
+        '200': { description: Moderation queue }
+  /workspaces/{workspaceId}/moderation/ideas/merge:
+    post:
+      summary: Merge duplicate idea into target idea
+      responses:
+        '200': { description: Merge result }
+  /workspaces/{workspaceId}/moderation/ideas/{ideaId}/spam:
+    patch:
+      summary: Mark or restore spam moderation state
       responses:
         '200':
-          description: Comment list
+          description: Moderated idea
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Idea'
+  /workspaces/{workspaceId}/moderation/ideas/{ideaId}/comments-lock:
+    patch:
+      summary: Lock or unlock idea comments
+      responses:
+        '200':
+          description: Moderated idea
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Idea'
+  /workspaces/{workspaceId}/moderation/ideas/bulk:
+    post:
+      summary: Bulk moderation actions for selected ideas
+      responses:
+        '200': { description: Bulk moderation result }
+  /workspaces/{workspaceId}/analytics/ideas:
+    get:
+      summary: List ranked analytics rows or export CSV
+      responses:
+        '200':
+          description: Analytics list or csv export
           content:
             application/json:
               schema:
@@ -382,106 +294,47 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/IdeaComment'
+                      $ref: '#/components/schemas/AnalyticsIdea'
+            text/csv:
+              schema:
+                type: string
+  /workspaces/{workspaceId}/analytics/ideas/{ideaId}/input:
+    put:
+      summary: Upsert RICE and revenue scoring inputs
+      responses:
+        '204': { description: Input saved }
+  /workspaces/{workspaceId}/analytics/ideas/{ideaId}/outreach:
     post:
-      summary: Add comment to an idea
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: boardId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: ideaId
-          required: true
-          schema:
-            type: string
+      summary: Enqueue outreach notification job to idea audience
       responses:
         '201':
-          description: Comment created
+          description: Outreach notification job created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/IdeaComment'
+                $ref: '#/components/schemas/NotificationJobEnqueue'
   /workspaces/{workspaceId}/members:
     get:
       summary: List workspace members
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
       responses:
-        '200':
-          description: Member list
+        '200': { description: Member list }
   /workspaces/{workspaceId}/members/invite:
     post:
       summary: Invite member
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
       responses:
-        '201':
-          description: Member invited
+        '201': { description: Member invited }
   /workspaces/{workspaceId}/members/{userId}/role:
     patch:
       summary: Update member role
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: userId
-          required: true
-          schema:
-            type: string
       responses:
-        '200':
-          description: Role updated
+        '200': { description: Role updated }
   /workspaces/{workspaceId}/members/{userId}:
     delete:
       summary: Deactivate member
-      parameters:
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: userId
-          required: true
-          schema:
-            type: string
       responses:
-        '200':
-          description: Member deactivated
+        '200': { description: Member deactivated }
   /workspaces/{workspaceId}/audit-events:
     get:
       summary: List audit events
-      parameters:
-        - in: query
-          name: limit
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 500
-        - in: path
-          name: workspaceId
-          required: true
-          schema:
-            type: string
       responses:
-        '200':
-          description: Audit event list
+        '200': { description: Audit event list }

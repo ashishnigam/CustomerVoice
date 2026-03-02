@@ -3,35 +3,55 @@
 CustomerVoice is a multi-tenant feedback and product-delivery orchestration platform inspired by UserVoice and Microsoft Feedback Portal workflows.
 
 Current implementation includes:
-- Workspace-aware feedback portal (`boards`, `ideas`, `votes`, `comments`, `status`).
+- Workspace-aware feedback portal with boards, ideas, votes, comments, categories, and status transitions.
+- Portal search/sort/filter flows plus moderation queue for spam, comment lock, duplicate merge, and bulk actions.
+- Notification job pipeline for shipped-idea updates and analytics outreach emails.
+- Internal analytics dashboard with RICE, revenue potential, contact audience, and CSV export.
 - RBAC policy engine with workspace scope enforcement.
 - Supabase JWT verification (or local mock mode).
-- Audit event persistence for auth/admin/product actions.
-- Monorepo scaffold for web, api, worker, and mobile apps.
+- Audit event persistence for auth, moderation, notification, and analytics actions.
 
 ## Repository structure
-- `/apps/web`: React web portal shell (v1 feedback UX)
-- `/apps/api`: Node + Express API (RBAC + feedback domain)
-- `/apps/worker`: async worker scaffold
+- `/apps/web`: React web shell for portal, moderation, and analytics UX
+- `/apps/api`: Node + Express API for feedback, moderation, analytics, membership, and audit
+- `/apps/worker`: notification dispatcher worker (MailHog/SMTP locally)
 - `/apps/mobile`: React Native (Expo) shell
 - `/packages/*`: shared package stubs
 - `/infra/docker`: local stack via Docker Compose
-- `/infra/k8s`: baseline k8s manifests
+- `/infra/k8s`: baseline Kubernetes manifests
 - `/infra/terraform`: cloud IaC starter
-- `/docs`: PRD, architecture, ticket packs, QA artifacts
+- `/docs`: PRD, architecture, ticket packs, QA/UAT artifacts
 
-## Core v1 feature coverage
+## V1 feature coverage (implemented)
 - Auth + workspace context
   - Login state in web shell
   - Workspace switching
   - Unauthorized API response handling (`401/403` -> redirect to login)
-- Portal baseline
+- Public portal
   - Board list/create
   - Idea list/detail/create
   - Upvote/unvote
   - Comments list/create
   - Status transitions with role gating
-- Foundation services
+  - Search, status filter, category filter, and sort modes
+  - Category taxonomy and idea tagging
+- Internal moderation
+  - Moderation queue
+  - Mark spam / restore
+  - Lock / unlock comments
+  - Merge duplicate ideas while preserving votes/comments lineage
+  - Bulk moderation actions
+- Internal analytics
+  - RICE input + scoring
+  - Revenue potential input and ranking
+  - Audience contact list from upvoters/commenters
+  - CSV export
+  - Outreach job enqueue
+- Notifications
+  - Notification jobs and recipients persisted in DB
+  - Worker dispatch to SMTP / MailHog
+  - Automatic enqueue when idea status changes to `completed`
+- Platform services
   - Workspace membership APIs
   - Audit event APIs
   - CI pipeline with unit/integration + DB-backed integration suite
@@ -39,6 +59,7 @@ Current implementation includes:
 ## Tech stack
 - Frontend: React + Vite + TypeScript
 - Backend: Node.js + Express + TypeScript + Postgres
+- Worker: Node.js + TypeScript + Nodemailer
 - Auth: Supabase JWT verification (plus local mock mode)
 - Tooling: pnpm workspaces + Turbo + Vitest + ESLint
 - Local infra: Docker Compose (postgres, redis, mailhog, minio)
@@ -63,18 +84,10 @@ cp apps/worker/.env.example apps/worker/.env
 cp apps/mobile/.env.example apps/mobile/.env
 ```
 
-3. Start baseline infra:
+3. Start local infra and services:
 ```bash
 docker compose -f infra/docker/docker-compose.yml up -d postgres redis mailhog minio
-```
-
-4. Run migrations:
-```bash
 pnpm --filter @customervoice/api db:migrate
-```
-
-5. Start apps:
-```bash
 pnpm dev
 ```
 
@@ -82,6 +95,7 @@ Default local URLs:
 - Web: `http://localhost:3000`
 - API: `http://localhost:4000`
 - API health: `http://localhost:4000/health`
+- MailHog UI: `http://localhost:8025`
 
 ## Auth modes
 ### `AUTH_MODE=mock` (local default)
@@ -89,6 +103,10 @@ API accepts actor headers from web shell. Use seeded values:
 - `workspace_id`: `22222222-2222-2222-2222-222222222222`
 - `user_id`: `33333333-3333-3333-3333-333333333333`
 - `role`: `workspace_admin`
+
+Additional seeded memberships used in tests:
+- contributor `44444444-4444-4444-4444-444444444444`
+- viewer `55555555-5555-5555-5555-555555555555`
 
 ### `AUTH_MODE=supabase`
 Configure these env vars in `apps/api/.env`:
@@ -98,6 +116,16 @@ Configure these env vars in `apps/api/.env`:
 - `SUPABASE_JWKS_URL` (optional override)
 
 In this mode, API validates bearer tokens and resolves role from `workspace_memberships`.
+
+## Worker / email configuration
+Local worker defaults in `/Users/ashishnigam/Startups/CustomerVoice/apps/worker/.env.example`:
+- `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice`
+- `SMTP_HOST=localhost`
+- `SMTP_PORT=1025`
+- `WORKER_FROM_EMAIL=notifications@customervoice.local`
+- `NOTIFICATION_POLL_INTERVAL_MS=5000`
+
+Docker Compose already points worker SMTP to `mailhog:1025`.
 
 ## Common commands
 ```bash
@@ -112,45 +140,62 @@ pnpm --filter @customervoice/api test:integration:db
 ## DB-backed integration tests
 The DB-backed suite requires a Postgres instance in `DATABASE_URL`.
 
-Example (isolated local run):
+Example isolated run:
 ```bash
 docker compose -f infra/docker/docker-compose.yml up -d postgres
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice pnpm --filter @customervoice/api db:migrate
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice pnpm --filter @customervoice/api test:integration:db
 ```
 
-## API surface (v1 implemented)
-See `/apps/api/openapi/openapi.yaml`.
+## Manual test flow
+1. Open `http://localhost:3000` and sign in with mock admin values.
+2. Create a board.
+3. Create categories.
+4. Create ideas and tag them.
+5. Verify search, status filter, category filter, and sort modes.
+6. Upvote/comment as contributor.
+7. Use `Moderation` tab to lock comments or merge duplicates.
+8. Use `Analytics` tab to save RICE/revenue inputs, export CSV, and enqueue outreach.
+9. Move an idea to `completed` and check MailHog for notification delivery.
 
-Main endpoints:
+## API surface (current)
+See `/Users/ashishnigam/Startups/CustomerVoice/apps/api/openapi/openapi.yaml`.
+
+Major endpoint groups:
 - Boards
   - `GET /api/v1/workspaces/:workspaceId/boards`
   - `POST /api/v1/workspaces/:workspaceId/boards`
+- Categories
+  - `GET /api/v1/workspaces/:workspaceId/categories`
+  - `POST /api/v1/workspaces/:workspaceId/categories`
+  - `PATCH /api/v1/workspaces/:workspaceId/categories/:categoryId`
 - Ideas
   - `GET /api/v1/workspaces/:workspaceId/boards/:boardId/ideas`
   - `POST /api/v1/workspaces/:workspaceId/boards/:boardId/ideas`
-  - `GET /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId`
+  - `PUT /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/categories`
   - `PATCH /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/status`
-- Votes
-  - `POST /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/votes`
-  - `DELETE /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/votes`
-- Comments
-  - `GET /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/comments`
-  - `POST /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/comments`
-- Membership
+- Votes / comments
+  - `POST|DELETE /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/votes`
+  - `GET|POST /api/v1/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/comments`
+- Moderation
+  - `GET /api/v1/workspaces/:workspaceId/moderation/ideas`
+  - `POST /api/v1/workspaces/:workspaceId/moderation/ideas/merge`
+  - `PATCH /api/v1/workspaces/:workspaceId/moderation/ideas/:ideaId/spam`
+  - `PATCH /api/v1/workspaces/:workspaceId/moderation/ideas/:ideaId/comments-lock`
+  - `POST /api/v1/workspaces/:workspaceId/moderation/ideas/bulk`
+- Analytics
+  - `GET /api/v1/workspaces/:workspaceId/analytics/ideas`
+  - `PUT /api/v1/workspaces/:workspaceId/analytics/ideas/:ideaId/input`
+  - `POST /api/v1/workspaces/:workspaceId/analytics/ideas/:ideaId/outreach`
+- Membership / audit
   - `GET /api/v1/workspaces/:workspaceId/members`
   - `POST /api/v1/workspaces/:workspaceId/members/invite`
-  - `PATCH /api/v1/workspaces/:workspaceId/members/:userId/role`
-  - `DELETE /api/v1/workspaces/:workspaceId/members/:userId`
-- Audit
   - `GET /api/v1/workspaces/:workspaceId/audit-events`
 
-## Sprint-1 status (current)
-- CV-001 to CV-013 implemented, including:
-  - CV-006: auth state + workspace switcher + unauthorized redirect flow in web shell.
-  - CV-010: UX/copy/route-map artifact in `/docs/CV-010-UX-Copy-Spec.md`.
-  - CV-011: QA/UAT artifacts and integration test baseline.
-  - CV-012/CV-013: board CRUD + board view wiring.
+## QA artifacts
+- Sprint-1 checklist: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-011-QA-UAT-Checklist.md`
+- V1 parity checklist: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-023-V1-Parity-QA-UAT-Checklist.md`
+- UX/copy handoff: `/Users/ashishnigam/Startups/CustomerVoice/docs/CV-010-UX-Copy-Spec.md`
 
 ## CI
 GitHub Actions workflow: `/.github/workflows/ci.yml`
@@ -160,9 +205,6 @@ GitHub Actions workflow: `/.github/workflows/ci.yml`
 - Unit/integration tests
 - DB-backed integration tests against ephemeral Postgres service
 
-## Roadmap after current implementation
-- Deploy orchestration and release automation (planned v2)
-- Enterprise white-label extensions (custom domain and branded emails)
-- Single-tenant/VPC deployment mode
-- SSO for GoodHealth.ai / GoodWealth.ai embedded integration
-- Payment/pricing transition after free-beta threshold
+## Next planned scopes
+- V2: beta cohorts, white-label custom domain/branded email, GoodHealth/GoodWealth SSO embed
+- V3: AI delivery pipeline with gate approvals and private model routing
