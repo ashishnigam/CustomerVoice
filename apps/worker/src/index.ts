@@ -22,6 +22,12 @@ interface NotificationRecipient {
   status: 'pending' | 'sent' | 'failed';
 }
 
+interface Webhook {
+  id: string;
+  url: string;
+  secret: string;
+}
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required for worker notifications');
@@ -237,6 +243,49 @@ async function finalizeJob(params: {
   );
 }
 
+async function dispatchWebhooks(job: NotificationJob): Promise<void> {
+  try {
+    const hw = await pool.query<Webhook>(
+      `
+        SELECT id, url, secret
+        FROM webhooks
+        WHERE workspace_id = $1
+          AND active = true
+          AND $2 = ANY(events)
+      `,
+      [job.workspace_id, job.event_type],
+    );
+
+    if (hw.rows.length === 0) return;
+
+    const promises = hw.rows.map(async (wh) => {
+      try {
+        const res = await fetch(wh.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-cv-webhook-secret': wh.secret,
+          },
+          body: JSON.stringify({
+            event: job.event_type,
+            payload: job.payload,
+            timestamp: new Date().toISOString(),
+          }),
+        });
+        if (!res.ok) {
+          console.warn(`[webhook] dispatch failed url=${wh.url} status=${res.status}`);
+        }
+      } catch (err: any) {
+        console.error(`[webhook] dispatch error url=${wh.url}`, err.message);
+      }
+    });
+
+    await Promise.allSettled(promises);
+  } catch (err: any) {
+    console.error(`[webhook] fetch webhooks failed`, err.message);
+  }
+}
+
 async function processNextJob(): Promise<boolean> {
   const claimed = await claimNotificationJob();
   if (!claimed) {
@@ -262,6 +311,11 @@ async function processNextJob(): Promise<boolean> {
       lastError = message;
       await markRecipientFailed(recipient.id, message);
     }
+  }
+
+  // Dispatch Webhooks
+  if (attemptCount === 1) {
+    await dispatchWebhooks(job);
   }
 
   await finalizeJob({

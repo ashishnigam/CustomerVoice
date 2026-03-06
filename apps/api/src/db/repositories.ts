@@ -65,6 +65,7 @@ interface IdeaCommentRow {
   body: string;
   active: boolean;
   is_official: boolean;
+  is_internal: boolean;
   is_team_member: boolean;
   created_at: string;
   updated_at: string;
@@ -116,6 +117,16 @@ interface NotificationRecipientRow {
   attempts: number;
   last_error: string | null;
   sent_at: string | null;
+  created_at: string;
+}
+
+interface WebhookRow {
+  id: string;
+  workspace_id: string;
+  url: string;
+  events: string[];
+  secret: string;
+  active: boolean;
   created_at: string;
 }
 
@@ -178,6 +189,7 @@ export interface IdeaRecord {
   status: IdeaStatus;
   moderationState: IdeaModerationState;
   commentsLocked: boolean;
+  mergedIntoId?: string | null;
   mergedIntoIdeaId: string | null;
   active: boolean;
   createdBy: string;
@@ -201,6 +213,7 @@ export interface IdeaCommentRecord {
   body: string;
   active: boolean;
   isOfficial: boolean;
+  isInternal: boolean;
   isTeamMember: boolean;
   createdAt: string;
   updatedAt: string;
@@ -260,6 +273,16 @@ export interface NotificationRecipientRecord {
   attempts: number;
   lastError: string | null;
   sentAt: string | null;
+  createdAt: string;
+}
+
+export interface WebhookRecord {
+  id: string;
+  workspaceId: string;
+  url: string;
+  events: string[];
+  secret: string;
+  active: boolean;
   createdAt: string;
 }
 
@@ -339,6 +362,7 @@ function mapIdea(row: IdeaRow): IdeaRecord {
     status: row.status,
     moderationState: row.moderation_state,
     commentsLocked: row.comments_locked,
+    mergedIntoId: row.merged_into_idea_id,
     mergedIntoIdeaId: row.merged_into_idea_id,
     active: row.active,
     createdBy: row.created_by,
@@ -364,6 +388,7 @@ function mapIdeaComment(row: IdeaCommentRow): IdeaCommentRecord {
     body: row.body,
     active: row.active,
     isOfficial: row.is_official ?? false,
+    isInternal: row.is_internal ?? false,
     isTeamMember: row.is_team_member ?? false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1155,6 +1180,7 @@ export async function listIdeaComments(params: {
   workspaceId: string;
   ideaId: string;
   limit?: number;
+  excludeInternal?: boolean;
 }): Promise<IdeaCommentRecord[]> {
   const clampedLimit = Math.max(1, Math.min(params.limit ?? 100, 300));
   const result = await query<IdeaCommentRow>(
@@ -1174,6 +1200,7 @@ export async function listIdeaComments(params: {
       FROM idea_comments c
       JOIN users u ON u.id = c.user_id
       WHERE c.workspace_id = $1 AND c.idea_id = $2 AND c.active = TRUE
+      ${params.excludeInternal ? 'AND c.is_internal = FALSE' : ''}
       ORDER BY c.is_official DESC, c.created_at ASC
       LIMIT $3
     `,
@@ -1188,6 +1215,7 @@ export async function createIdeaComment(params: {
   ideaId: string;
   userId: string;
   body: string;
+  isInternal?: boolean;
 }): Promise<IdeaCommentRecord> {
   const ideaLockCheck = await query<{ comments_locked: boolean }>(
     `
@@ -1216,9 +1244,10 @@ export async function createIdeaComment(params: {
         idea_id,
         user_id,
         body,
+        is_internal,
         active
       )
-      VALUES ($1, $2, $3, $4, $5, TRUE)
+      VALUES ($1, $2, $3, $4, $5, $6, TRUE)
       RETURNING
         id,
         workspace_id,
@@ -1231,10 +1260,13 @@ export async function createIdeaComment(params: {
         ) AS user_email,
         body,
         active,
+        is_official,
+        is_internal,
+        is_team_member,
         created_at,
         updated_at
     `,
-    [id, params.workspaceId, params.ideaId, params.userId, params.body],
+    [id, params.workspaceId, params.ideaId, params.userId, params.body, params.isInternal ?? false],
   );
 
   if ((result.rowCount ?? 0) === 0) {
@@ -1420,6 +1452,7 @@ export async function setIdeaCategories(params: {
   });
 }
 
+
 export async function setIdeaModerationState(params: {
   workspaceId: string;
   boardId: string;
@@ -1502,21 +1535,11 @@ export async function mergeIdeas(params: {
 
   const boardContext = await withTransaction(async (client) => {
     const sourceResult = await client.query<{ id: string; board_id: string }>(
-      `
-        SELECT id, board_id
-        FROM ideas
-        WHERE workspace_id = $1 AND id = $2
-        LIMIT 1
-      `,
+      `SELECT id, board_id FROM ideas WHERE workspace_id = $1 AND id = $2 LIMIT 1`,
       [params.workspaceId, params.sourceIdeaId],
     );
     const targetResult = await client.query<{ id: string; board_id: string }>(
-      `
-        SELECT id, board_id
-        FROM ideas
-        WHERE workspace_id = $1 AND id = $2
-        LIMIT 1
-      `,
+      `SELECT id, board_id FROM ideas WHERE workspace_id = $1 AND id = $2 LIMIT 1`,
       [params.workspaceId, params.targetIdeaId],
     );
 
@@ -1526,6 +1549,8 @@ export async function mergeIdeas(params: {
 
     const sourceBoardId = sourceResult.rows[0]?.board_id;
     const targetBoardId = targetResult.rows[0]?.board_id;
+
+    // Cross board merges are disallowed
     if (!sourceBoardId || !targetBoardId || sourceBoardId !== targetBoardId) {
       throw new Error('merge_requires_same_board');
     }
@@ -1536,16 +1561,13 @@ export async function mergeIdeas(params: {
         SELECT workspace_id, $2, user_id
         FROM idea_votes
         WHERE workspace_id = $1 AND idea_id = $3
-        ON CONFLICT (idea_id, user_id) DO NOTHING
+        ON CONFLICT (workspace_id, idea_id, user_id) DO NOTHING
       `,
       [params.workspaceId, params.targetIdeaId, params.sourceIdeaId],
     );
 
     await client.query(
-      `
-        DELETE FROM idea_votes
-        WHERE workspace_id = $1 AND idea_id = $2
-      `,
+      `DELETE FROM idea_votes WHERE workspace_id = $1 AND idea_id = $2`,
       [params.workspaceId, params.sourceIdeaId],
     );
 
@@ -1564,17 +1586,24 @@ export async function mergeIdeas(params: {
         SELECT workspace_id, $2, category_id
         FROM idea_category_links
         WHERE workspace_id = $1 AND idea_id = $3
-        ON CONFLICT (idea_id, category_id) DO NOTHING
+        ON CONFLICT (workspace_id, idea_id, category_id) DO NOTHING
       `,
       [params.workspaceId, params.targetIdeaId, params.sourceIdeaId],
     );
 
     await client.query(
-      `
-        DELETE FROM idea_category_links
-        WHERE workspace_id = $1 AND idea_id = $2
-      `,
+      `DELETE FROM idea_category_links WHERE workspace_id = $1 AND idea_id = $2`,
       [params.workspaceId, params.sourceIdeaId],
+    );
+
+    // Attach attachments as well
+    await client.query(
+      `
+        UPDATE idea_attachments
+        SET idea_id = $2
+        WHERE workspace_id = $1 AND idea_id = $3
+      `,
+      [params.workspaceId, params.targetIdeaId, params.sourceIdeaId],
     );
 
     await client.query(
@@ -1582,8 +1611,10 @@ export async function mergeIdeas(params: {
         UPDATE ideas
         SET
           moderation_state = 'merged',
-          merged_into_idea_id = $3,
+          merged_into_id = $3,
           comments_locked = TRUE,
+          vote_count = 0,
+          comment_count = 0,
           active = FALSE,
           updated_by = $4,
           updated_at = NOW()
@@ -1595,21 +1626,26 @@ export async function mergeIdeas(params: {
     await client.query(
       `
         UPDATE ideas
-        SET updated_by = $3, updated_at = NOW()
+        SET 
+          updated_by = $3, 
+          updated_at = NOW(),
+          vote_count = (
+            SELECT COUNT(*)::int FROM idea_votes
+            WHERE workspace_id = $1 AND idea_id = $2
+          ),
+          comment_count = (
+            SELECT COUNT(*)::int FROM idea_comments
+            WHERE workspace_id = $1 AND idea_id = $2 AND active = TRUE
+          )
         WHERE workspace_id = $1 AND id = $2
       `,
       [params.workspaceId, params.targetIdeaId, params.updatedBy],
     );
 
-    return {
-      sourceBoardId,
-      targetBoardId,
-    };
+    return { sourceBoardId, targetBoardId };
   });
 
-  if (!boardContext) {
-    return null;
-  }
+  if (!boardContext) return null;
 
   const [sourceIdea, targetIdea] = await Promise.all([
     findIdea({
@@ -2691,6 +2727,7 @@ export async function createPublicIdeaComment(params: {
   userId: string;
   userEmail: string;
   body: string;
+  isInternal?: boolean;
 }): Promise<IdeaCommentRecord> {
   // Check if comments are locked
   const ideaResult = await query<{ comments_locked: boolean }>(
@@ -2713,17 +2750,27 @@ export async function createPublicIdeaComment(params: {
     displayName: params.userEmail.split('@')[0],
   });
 
+  // Only allow is_internal if the user is a team member
+  let isInternal = false;
+  if (params.isInternal) {
+    const membershipResult = await query(
+      `SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2 AND active = TRUE LIMIT 1`,
+      [params.workspaceId, params.userId]
+    );
+    isInternal = (membershipResult.rowCount ?? 0) > 0;
+  }
+
   const id = uuidv4();
   const result = await query<IdeaCommentRow>(
     `
-      INSERT INTO idea_comments (id, workspace_id, idea_id, user_id, body)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO idea_comments (id, workspace_id, idea_id, user_id, body, is_internal)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING
         id, workspace_id, idea_id, user_id,
         (SELECT email FROM users WHERE id = $4) AS user_email,
-        body, active, is_official, is_team_member, created_at, updated_at
+        body, active, is_official, is_internal, is_team_member, created_at, updated_at
     `,
-    [id, params.workspaceId, params.ideaId, params.userId, params.body],
+    [id, params.workspaceId, params.ideaId, params.userId, params.body, isInternal],
   );
 
   return mapIdeaComment(result.rows[0]);
@@ -3560,4 +3607,125 @@ export async function listCommentAttachments(params: {
     createdBy: row.created_by,
     createdAt: row.created_at,
   }));
+}
+
+function mapWebhook(row: any): WebhookRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    url: row.url,
+    events: row.events,
+    secret: row.secret,
+    active: row.active,
+    createdAt: row.created_at,
+  };
+}
+
+export async function createWebhook(params: {
+  workspaceId: string;
+  url: string;
+  events: string[];
+  secret: string;
+  active?: boolean;
+}): Promise<WebhookRecord> {
+  const id = uuidv4();
+  const active = params.active ?? true;
+
+  const result = await query(
+    `
+      INSERT INTO webhooks (id, workspace_id, url, events, secret, active)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `,
+    [id, params.workspaceId, params.url, params.events, params.secret, active]
+  );
+
+  return mapWebhook(result.rows[0]);
+}
+
+export async function listWebhooks(workspaceId: string): Promise<WebhookRecord[]> {
+  const result = await query(
+    `
+      SELECT * FROM webhooks
+      WHERE workspace_id = $1
+      ORDER BY created_at DESC
+    `,
+    [workspaceId]
+  );
+
+  return result.rows.map(mapWebhook);
+}
+
+export async function updateWebhook(
+  id: string,
+  workspaceId: string,
+  params: {
+    url?: string;
+    events?: string[];
+    secret?: string;
+    active?: boolean;
+  }
+): Promise<WebhookRecord | null> {
+  const parts: string[] = [];
+  const values: any[] = [];
+  let paramIdx = 1;
+
+  if (params.url !== undefined) {
+    parts.push(`url = $${paramIdx++}`);
+    values.push(params.url);
+  }
+  if (params.events !== undefined) {
+    parts.push(`events = $${paramIdx++}`);
+    values.push(params.events);
+  }
+  if (params.secret !== undefined) {
+    parts.push(`secret = $${paramIdx++}`);
+    values.push(params.secret);
+  }
+  if (params.active !== undefined) {
+    parts.push(`active = $${paramIdx++}`);
+    values.push(params.active);
+  }
+
+  if (parts.length === 0) return null;
+
+  values.push(id);
+  const idIdx = paramIdx++;
+  values.push(workspaceId);
+  const wsIdx = paramIdx++;
+
+  const sql = `
+    UPDATE webhooks
+    SET ${parts.join(', ')}
+    WHERE id = $${idIdx} AND workspace_id = $${wsIdx}
+    RETURNING *
+  `;
+
+  const result = await query(sql, values);
+  return result.rows.length ? mapWebhook(result.rows[0]) : null;
+}
+
+export async function deleteWebhook(id: string, workspaceId: string): Promise<boolean> {
+  const result = await query(
+    `
+      DELETE FROM webhooks
+      WHERE id = $1 AND workspace_id = $2
+      RETURNING id
+    `,
+    [id, workspaceId]
+  );
+  return result.rows.length > 0;
+}
+
+export async function getActiveWebhooksForEvent(workspaceId: string, event: string): Promise<WebhookRecord[]> {
+  const result = await query(
+    `
+      SELECT * FROM webhooks
+      WHERE workspace_id = $1
+        AND active = true
+        AND $2 = ANY(events)
+    `,
+    [workspaceId, event]
+  );
+  return result.rows.map(mapWebhook);
 }

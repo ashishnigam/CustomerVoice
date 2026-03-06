@@ -3453,6 +3453,31 @@ h4 {
   color: var(--cv-subtle);
 }
 
+.cp-internal-badge {
+  background: var(--cv-warning-light, #fef3c7);
+  color: var(--cv-warning-dark, #b45309);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid rgba(180, 83, 9, 0.2);
+}
+
+.cp-comment:has(.cp-internal-badge) {
+  background: repeating-linear-gradient(45deg,
+      var(--cv-warning-light, #fef3c7) 0,
+      var(--cv-warning-light, #fef3c7) 10px,
+      #fdf0b4 10px,
+      #fdf0b4 20px);
+  border-color: rgba(180, 83, 9, 0.3);
+}
+
+.cp-comment:has(.cp-internal-badge) .cp-comment-text {
+  color: var(--cv-warning-dark, #b45309);
+}
+
 .cp-comment-content p {
   font-size: 0.88rem;
   color: var(--cv-ink-3);

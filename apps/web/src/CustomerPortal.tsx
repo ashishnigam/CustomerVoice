@@ -62,6 +62,8 @@ interface Idea {
     status: IdeaStatus;
     voteCount: number;
     commentCount: number;
+    mergedIntoId?: string | null;
+    mergedIntoIdeaId?: string | null;
     viewerHasVoted: boolean;
     categoryIds: string[];
     categoryNames: string[];
@@ -76,6 +78,7 @@ interface IdeaComment {
     userEmail: string;
     isOfficial: boolean;
     isTeamMember: boolean;
+    isInternal?: boolean;
     createdAt: string;
     upvoteCount?: number;
     viewerHasUpvoted?: boolean;
@@ -283,6 +286,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
     /* ── Comment ── */
     const [commentBody, setCommentBody] = useState('');
     const [commentFile, setCommentFile] = useState<File | null>(null);
+    const [isInternal, setIsInternal] = useState(false);
     const [commentBusy, setCommentBusy] = useState(false);
     const [replyingTo, setReplyingTo] = useState<IdeaComment | null>(null);
 
@@ -650,13 +654,18 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
         const doPost = async () => {
             setCommentBusy(true);
             try {
-                const body: any = { body: commentBody.trim() };
-                if (replyingTo) body.parentCommentId = replyingTo.id;
+                const bodyToSubmit = commentBody.trim();
+                const payload: any = { body: bodyToSubmit, isInternal };
+                if (replyingTo) payload.parentCommentId = replyingTo.id;
 
+                // NOTE: The instruction provided a different URL and auth scheme.
+                // Assuming `boardSlug` is still the correct identifier for the board.
+                // The instruction also implies `visitorId` is used as a bearer token,
+                // which is unusual for public APIs but followed as per instruction.
                 const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${selectedIdea.id}/comments`, {
                     method: 'POST',
                     headers: authHeaders,
-                    body: JSON.stringify(body),
+                    body: JSON.stringify(payload),
                 });
 
                 if (res.status === 401) {
@@ -684,6 +693,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
 
                     void loadIdeaDetail(selectedIdea.id, detailViewMode);
                     setCommentBody('');
+                    setIsInternal(false);
                     setCommentFile(null);
                     setReplyingTo(null);
                     setSelectedIdea((prev) =>
@@ -1197,6 +1207,8 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                                     className={`cp-vote-btn ${idea.viewerHasVoted ? 'voted' : ''}`}
                                                     onClick={(e) => { e.stopPropagation(); onToggleVote(idea); }}
                                                     title={idea.viewerHasVoted ? 'Remove vote' : 'Upvote this idea'}
+                                                    disabled={idea.status === 'declined'}
+                                                    style={idea.status === 'declined' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                                                 >
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="16" height="16">
                                                         <path d="M12 19V5M5 12l7-7 7 7" />
@@ -1408,6 +1420,8 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                 <button
                                     className={`cp-detail-vote-btn ${selectedIdea.viewerHasVoted ? 'voted' : ''}`}
                                     onClick={() => onToggleVote(selectedIdea)}
+                                    disabled={selectedIdea.status === 'declined'}
+                                    style={selectedIdea.status === 'declined' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                                 >
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18">
                                         <path d="M12 19V5M5 12l7-7 7 7" />
@@ -1416,6 +1430,28 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                 </button>
                                 <span className="cp-detail-vote-count">{selectedIdea.voteCount} votes</span>
                             </div>
+
+                            {/* Merged Banner */}
+                            {(selectedIdea.mergedIntoIdeaId || selectedIdea.mergedIntoId) && (
+                                <div style={{
+                                    padding: '16px',
+                                    background: '#fef3c7',
+                                    color: '#b45309',
+                                    borderRadius: '8px',
+                                    marginBottom: '16px',
+                                    fontSize: '0.9rem',
+                                    border: '1px solid #fde68a'
+                                }}>
+                                    <strong>This idea has been merged.</strong> Its votes and comments point to the new parent idea.
+                                    <button
+                                        className="hero-button ghost"
+                                        style={{ display: 'block', marginTop: '8px', padding: '6px 12px', fontSize: '0.8rem', background: '#fef3c7', borderColor: '#fde68a' }}
+                                        onClick={() => void loadIdeaDetail(selectedIdea.mergedIntoIdeaId || selectedIdea.mergedIntoId || '')}
+                                    >
+                                        View merged idea ➔
+                                    </button>
+                                </div>
+                            )}
 
                             <h1 className="cp-detail-title">{selectedIdea.title}</h1>
 
@@ -1504,6 +1540,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                                     <div className="cp-comment-header">
                                                         <strong>{node.userEmail.split('@')[0]}</strong>
                                                         {node.isTeamMember ? <span className="cp-team-badge">Team</span> : null}
+                                                        {node.isInternal ? <span className="cp-internal-badge" style={{ background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>🔒 Internal</span> : null}
                                                         <span>{formatDate(node.createdAt)}</span>
                                                     </div>
                                                     <div className="cp-comment-text">
@@ -1573,10 +1610,16 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                             rows={3}
                                             disabled={commentBusy}
                                         />
-                                        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--cv-border)', background: 'var(--cv-bg-hover)', display: 'flex', alignItems: 'center', borderBottomLeftRadius: '8px', borderBottomRightRadius: '24px' }}>
+                                        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--cv-border)', background: 'var(--cv-bg-hover)', display: 'flex', alignItems: 'center', borderBottomLeftRadius: '8px', borderBottomRightRadius: '24px', justifyContent: 'space-between' }}>
                                             <label style={{ fontSize: '0.75rem', color: 'var(--cv-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                                 📎 <input type="file" onChange={(e) => setCommentFile(e.target.files?.[0] || null)} style={{ fontSize: '0.75rem', width: '200px' }} />
                                             </label>
+                                            {portalUser?.email?.endsWith('@customervoice.com') ? (
+                                                <label style={{ fontSize: '0.75rem', color: 'var(--cv-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <input type="checkbox" checked={isInternal} onChange={(e) => setIsInternal(e.target.checked)} />
+                                                    🔒 Internal Note
+                                                </label>
+                                            ) : null}
                                         </div>
                                         <button
                                             className="cp-comment-post-btn"

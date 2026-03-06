@@ -59,7 +59,7 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
 
     const [session, setSession] = useState<Session | null>(null);
     const [authNotice, setAuthNotice] = useState<string | null>(null);
-    const [currentTab, setCurrentTab] = useState<'settings' | 'ideas' | 'changelog'>('settings');
+    const [currentTab, setCurrentTab] = useState<'settings' | 'ideas' | 'changelog' | 'webhooks'>('settings');
 
     const [workspaceIdFn, setWorkspaceIdFn] = useState(defaultWorkspaceId);
     const [userIdFn, setUserIdFn] = useState(defaultUserId);
@@ -82,6 +82,19 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
     const [changelogBody, setChangelogBody] = useState('');
     const [changelogType, setChangelogType] = useState<'feature' | 'improvement' | 'bugfix'>('feature');
     const [changelogBusy, setChangelogBusy] = useState(false);
+
+    const [mergeModalOpen, setMergeModalOpen] = useState(false);
+    const [mergeSourceIdea, setMergeSourceIdea] = useState<Idea | null>(null);
+    const [mergeTargetId, setMergeTargetId] = useState('');
+    const [mergeBusy, setMergeBusy] = useState(false);
+
+    const [webhooks, setWebhooks] = useState<any[]>([]);
+    const [webhookUrl, setWebhookUrl] = useState('');
+    const [webhookSecret, setWebhookSecret] = useState('');
+    const [webhookEventsIdeaCreated, setWebhookEventsIdeaCreated] = useState(true);
+    const [webhookEventsCommentCreated, setWebhookEventsCommentCreated] = useState(true);
+    const [webhookEventsIdeaStatusUpdated, setWebhookEventsIdeaStatusUpdated] = useState(true);
+    const [webhookBusy, setWebhookBusy] = useState(false);
 
     useEffect(() => {
         if (!boardSlug) return;
@@ -124,6 +137,26 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
         }
     }, [session, currentTab, loadIdeas]);
 
+    const loadWebhooks = useCallback(async () => {
+        if (!session) return;
+        try {
+            const h = requestHeaders(session);
+            const res = await fetch(`${apiBase}/workspaces/${session.workspaceId}/webhooks`, { headers: h });
+            if (res.ok) {
+                const data = await res.json();
+                setWebhooks(data.items || []);
+            }
+        } catch (err) {
+            console.error('load webhooks error', err);
+        }
+    }, [session]);
+
+    useEffect(() => {
+        if (session && currentTab === 'webhooks') {
+            void loadWebhooks();
+        }
+    }, [session, currentTab, loadWebhooks]);
+
     const handleLogin = (e: FormEvent) => {
         e.preventDefault();
         setSession({
@@ -162,6 +195,35 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
             alert('Error network');
         } finally {
             setSaveBusy(false);
+        }
+    };
+
+    const handleMergeIdea = async () => {
+        if (!session || !boardId || !mergeSourceIdea || !mergeTargetId) return;
+        setMergeBusy(true);
+        try {
+            const h = requestHeaders(session);
+            const res = await fetch(`${apiBase}/workspaces/${session.workspaceId}/boards/${boardId}/ideas/${mergeSourceIdea.id}/merge`, {
+                method: 'POST',
+                headers: h,
+                body: JSON.stringify({ targetIdeaId: mergeTargetId })
+            });
+
+            if (res.ok) {
+                alert('Idea successfully merged!');
+                setMergeModalOpen(false);
+                setMergeSourceIdea(null);
+                setMergeTargetId('');
+                void loadIdeas();
+            } else {
+                const data = await res.json();
+                alert(`Merge failed: ${data.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Network error merging idea');
+        } finally {
+            setMergeBusy(false);
         }
     };
 
@@ -220,6 +282,7 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                     <button className={currentTab === 'settings' ? 'active' : ''} onClick={() => setCurrentTab('settings')}>Board Settings</button>
                     <button className={currentTab === 'ideas' ? 'active' : ''} onClick={() => setCurrentTab('ideas')}>Manage Ideas</button>
                     <button className={currentTab === 'changelog' ? 'active' : ''} onClick={() => setCurrentTab('changelog')}>Changelogs</button>
+                    <button className={currentTab === 'webhooks' ? 'active' : ''} onClick={() => setCurrentTab('webhooks')}>Webhooks</button>
                 </div>
             </header>
 
@@ -302,6 +365,17 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                                             <option value="completed">Shipped (Completed)</option>
                                             <option value="declined">Declined</option>
                                         </select>
+                                        <button
+                                            className="hero-button ghost"
+                                            style={{ color: 'var(--cv-subtle)', padding: '8px 12px' }}
+                                            onClick={() => {
+                                                setMergeSourceIdea(idea);
+                                                setMergeModalOpen(true);
+                                                setMergeTargetId('');
+                                            }}
+                                        >
+                                            Merge
+                                        </button>
                                     </div>
                                 </div>
                             ))}
@@ -369,7 +443,138 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                         </form>
                     </div>
                 )}
+
+                {currentTab === 'webhooks' && (
+                    <div style={{ background: 'var(--cv-elevated)', padding: '2rem', borderRadius: '12px', border: '1px solid var(--cv-border)' }}>
+                        <h2 style={{ marginBottom: '1.5rem' }}>Workspace Integrations &amp; Webhooks</h2>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!session) return;
+                            setWebhookBusy(true);
+                            try {
+                                const h = requestHeaders(session);
+                                const events = [];
+                                if (webhookEventsIdeaCreated) events.push('idea.created');
+                                if (webhookEventsCommentCreated) events.push('comment.created');
+                                if (webhookEventsIdeaStatusUpdated) events.push('idea.status.updated');
+
+                                const res = await fetch(`${apiBase}/workspaces/${session.workspaceId}/webhooks`, {
+                                    method: 'POST',
+                                    headers: h,
+                                    body: JSON.stringify({
+                                        url: webhookUrl,
+                                        secret: webhookSecret || crypto.randomUUID(),
+                                        events,
+                                        active: true
+                                    })
+                                });
+                                if (res.ok) {
+                                    setWebhookUrl('');
+                                    setWebhookSecret('');
+                                    void loadWebhooks();
+                                } else {
+                                    alert('Failed to save webhook');
+                                }
+                            } catch (err) {
+                                console.error(err);
+                            } finally {
+                                setWebhookBusy(false);
+                            }
+                        }} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
+                            <div className="cp-form-group">
+                                <label>Webhook URL</label>
+                                <input type="url" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} required placeholder="https://external-api.com/webhook" />
+                            </div>
+                            <div className="cp-form-group">
+                                <label>Secret (Optional)</label>
+                                <input value={webhookSecret} onChange={e => setWebhookSecret(e.target.value)} placeholder="crypto.randomUUID() chosen by default if empty" />
+                            </div>
+                            <div className="cp-form-group">
+                                <label>Subscribe to Events</label>
+                                <div style={{ display: 'flex', gap: '1rem' }}>
+                                    <label style={{ display: 'flex', gap: '4px', alignItems: 'center', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={webhookEventsIdeaCreated} onChange={e => setWebhookEventsIdeaCreated(e.target.checked)} />
+                                        idea.created
+                                    </label>
+                                    <label style={{ display: 'flex', gap: '4px', alignItems: 'center', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={webhookEventsCommentCreated} onChange={e => setWebhookEventsCommentCreated(e.target.checked)} />
+                                        comment.created
+                                    </label>
+                                    <label style={{ display: 'flex', gap: '4px', alignItems: 'center', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={webhookEventsIdeaStatusUpdated} onChange={e => setWebhookEventsIdeaStatusUpdated(e.target.checked)} />
+                                        idea.status.updated
+                                    </label>
+                                </div>
+                            </div>
+                            <button type="submit" className="hero-button" disabled={webhookBusy || !webhookUrl} style={{ alignSelf: 'flex-start' }}>
+                                {webhookBusy ? 'Saving...' : 'Add Webhook'}
+                            </button>
+                        </form>
+
+                        <h3>Active Webhooks</h3>
+                        {webhooks.length === 0 ? <p style={{ color: 'var(--cv-subtle)' }}>No webhooks configured.</p> : webhooks.map(wh => (
+                            <div key={wh.id} style={{ padding: '16px', background: 'var(--cv-bg)', border: '1px solid var(--cv-border)', borderRadius: '8px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                    <h4 style={{ margin: '0 0 8px 0', fontSize: '0.95rem' }}>{wh.url}</h4>
+                                    <div style={{ display: 'flex', gap: '8px', fontSize: '0.8rem', color: 'var(--cv-subtle)' }}>
+                                        <span>Status: {wh.active ? '🟢 Active' : '🔴 Inactive'}</span>
+                                        <span>Events: {wh.events?.join(', ') || 'None'}</span>
+                                    </div>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--cv-subtle)', marginTop: '4px' }}>Secret: <code>{wh.secret}</code></div>
+                                </div>
+                                <button type="button" className="hero-button ghost" style={{ color: '#d9534f' }} onClick={async () => {
+                                    if (!window.confirm('Delete this webhook permanently?')) return;
+                                    try {
+                                        const h = requestHeaders(session);
+                                        const res = await fetch(`${apiBase}/workspaces/${session.workspaceId}/webhooks/${wh.id}`, { method: 'DELETE', headers: h });
+                                        if (res.ok) void loadWebhooks();
+                                    } catch (err) { console.error(err); }
+                                }}>Delete</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
             </main>
+
+            {mergeModalOpen && mergeSourceIdea && (
+                <div className="cp-modal-overlay">
+                    <div className="cp-modal-content">
+                        <h2>Merge Idea</h2>
+                        <p style={{ color: 'var(--cv-subtle)', marginBottom: '1.5rem', lineHeight: 1.5 }}>
+                            You are merging <strong>"{mergeSourceIdea.title}"</strong> into another idea.
+                            This will combine all votes, comments, and attachments into the target idea, and mark this one as declined.
+                            This action cannot be cleanly undone.
+                        </p>
+
+                        <div className="cp-form-group">
+                            <label>Target Idea</label>
+                            <select
+                                value={mergeTargetId}
+                                onChange={(e) => setMergeTargetId(e.target.value)}
+                                style={{ padding: '10px' }}
+                            >
+                                <option value="" disabled>Select an idea...</option>
+                                {ideas.filter(i => i.id !== mergeSourceIdea.id && i.status !== 'declined').map(idea => (
+                                    <option key={idea.id} value={idea.id}>{idea.title}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+                            <button className="hero-button ghost" onClick={() => setMergeModalOpen(false)}>Cancel</button>
+                            <button
+                                className="hero-button"
+                                disabled={mergeBusy || !mergeTargetId}
+                                onClick={handleMergeIdea}
+                                style={{ background: '#d9534f' }}
+                            >
+                                {mergeBusy ? 'Merging...' : 'Merge permanently'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

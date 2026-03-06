@@ -7,6 +7,7 @@ import { healthRouter } from './routes/health.js';
 import { ideasRouter } from './routes/ideas.js';
 import { membersRouter } from './routes/members.js';
 import { publicRouter } from './routes/public.js';
+import { webhooksRouter } from './routes/webhooks.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -23,6 +24,7 @@ export function createApp(): express.Express {
   app.use('/api/v1', requireActor, ideasRouter);
   app.use('/api/v1', requireActor, membersRouter);
   app.use('/api/v1', requireActor, auditRouter);
+  app.use('/api/v1', requireActor, webhooksRouter);
 
   app.use(
     (err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {

@@ -598,6 +598,60 @@ ideasRouter.post(
   }),
 );
 
+const mergeIdeaSchema = z.object({
+  targetIdeaId: z.string(),
+});
+
+ideasRouter.post(
+  '/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/merge',
+  requirePermission('moderation:write'),
+  asyncHandler(async (req, res) => {
+    const workspaceId = String(req.params.workspaceId);
+    const boardId = String(req.params.boardId);
+    const ideaId = String(req.params.ideaId);
+    const actor = (req as RequestWithActor).actor;
+
+    if (!actor) {
+      res.status(401).json({ error: 'actor_required' });
+      return;
+    }
+
+    const parsed = mergeIdeaSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+      return;
+    }
+
+    try {
+      const result = await mergeIdeas({
+        workspaceId,
+        sourceIdeaId: ideaId,
+        targetIdeaId: parsed.data.targetIdeaId,
+        updatedBy: actor.userId,
+      });
+
+      if (!result) {
+        res.status(404).json({ error: 'idea_not_found' });
+        return;
+      }
+
+      await emitAudit(req, 'idea.merged', {
+        sourceIdeaId: ideaId,
+        targetIdeaId: parsed.data.targetIdeaId,
+        boardId,
+      });
+
+      res.status(200).json(result);
+    } catch (e: any) {
+      if (e.message === 'merge_target_must_differ' || e.message === 'merge_requires_same_board') {
+        res.status(400).json({ error: e.message });
+        return;
+      }
+      throw e;
+    }
+  }),
+);
+
 ideasRouter.delete(
   '/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/votes',
   requirePermission('vote:write'),
@@ -654,10 +708,22 @@ ideasRouter.get(
       return;
     }
 
+    let isTeamMember = false;
+    const actor = (req as RequestWithActor).actor;
+    if (actor) {
+      const db = await import('../db/client.js');
+      const membershipResult = await db.query(
+        `SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2 AND active = TRUE LIMIT 1`,
+        [workspaceId, actor.userId]
+      );
+      isTeamMember = (membershipResult.rowCount ?? 0) > 0;
+    }
+
     const items = await listIdeaComments({
       workspaceId,
       ideaId,
       limit: parsed.data.limit,
+      excludeInternal: !isTeamMember,
     });
 
     // Attach attachments to each comment

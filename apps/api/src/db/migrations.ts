@@ -478,6 +478,19 @@ const migrations: Migration[] = [
         ON comment_attachments (comment_id);
     `,
   },
+  {
+    id: '010_idea_merging',
+    sql: `
+      ALTER TABLE ideas ADD COLUMN IF NOT EXISTS merged_into_id TEXT REFERENCES ideas(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_ideas_merged_into_id ON ideas (merged_into_id);
+    `,
+  },
+  {
+    id: '011_internal_staff_comments',
+    sql: `
+      ALTER TABLE idea_comments ADD COLUMN IF NOT EXISTS is_internal BOOLEAN NOT NULL DEFAULT false;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
