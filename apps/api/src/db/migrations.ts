@@ -432,6 +432,52 @@ const migrations: Migration[] = [
         ON password_reset_tokens (token);
     `,
   },
+  {
+    id: '008_auth_notifications',
+    sql: `
+      ALTER TABLE notification_jobs ALTER COLUMN board_id DROP NOT NULL;
+      ALTER TABLE notification_jobs ALTER COLUMN idea_id DROP NOT NULL;
+      ALTER TABLE notification_jobs ALTER COLUMN workspace_id DROP NOT NULL;
+      ALTER TABLE notification_job_recipients ALTER COLUMN workspace_id DROP NOT NULL;
+    `,
+  },
+  {
+    id: '009_idea_attachments',
+    sql: `
+      CREATE TABLE IF NOT EXISTS idea_attachments (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        file_url TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        size_bytes INT NOT NULL,
+        created_by TEXT REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_idea_attachments_idea
+        ON idea_attachments (idea_id);
+
+      CREATE TABLE IF NOT EXISTS comment_attachments (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+        comment_id TEXT NOT NULL REFERENCES idea_comments(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        file_url TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        size_bytes INT NOT NULL,
+        created_by TEXT REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_comment_attachments_comment
+        ON comment_attachments (comment_id);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

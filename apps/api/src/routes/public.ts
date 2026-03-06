@@ -38,8 +38,16 @@ import {
     findPasswordResetToken,
     markResetTokenUsed,
     updatePortalUserPassword,
+    listIdeaAttachments,
+    insertIdeaAttachment,
+    listCommentAttachments,
+    insertCommentAttachment,
 } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
+import multer from 'multer';
+import { uploadFileBuffer } from '../lib/storage.js';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
 const ideaSortSchema = z.enum(['top_voted', 'most_commented', 'newest']).optional();
 const ideaStatusSchema = z.enum([
@@ -258,7 +266,65 @@ publicRouter.get(
             ]);
         }
 
-        res.status(200).json({ idea, comments, isSubscribed, isFavorited });
+        const attachments = await listIdeaAttachments({
+            workspaceId: board.workspaceId,
+            ideaId: idea.id,
+        });
+
+        res.status(200).json({ idea, comments, isSubscribed, isFavorited, attachments });
+    }),
+);
+
+/* ── POST /public/boards/:boardSlug/ideas/:ideaId/attachments ── */
+publicRouter.post(
+    '/public/boards/:boardSlug/ideas/:ideaId/attachments',
+    upload.single('file'),
+    asyncHandler(async (req, res) => {
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        // Technically we should check auth settings for the board
+        const settings = await getBoardSettingsExtended(board.id);
+        const portalUser = await getPortalUser(req);
+
+        if (settings.requireAuthToSubmit && !portalUser) {
+            res.status(401).json({ error: 'auth_required' });
+            return;
+        }
+
+        if (!req.file) {
+            res.status(400).json({ error: 'missing_file' });
+            return;
+        }
+
+        const ideaId = String(req.params.ideaId);
+        const visitorId = portalUser?.id ?? getVisitorId(req);
+        const { buffer, originalname, mimetype, size } = req.file;
+
+        const fileUrl = await uploadFileBuffer(
+            buffer,
+            originalname,
+            mimetype,
+            `workspaces/${board.workspaceId}/boards/${board.id}/ideas/${ideaId}`
+        );
+
+        const attachmentRecord = await insertIdeaAttachment({
+            workspaceId: board.workspaceId,
+            boardId: board.id,
+            ideaId,
+            fileName: originalname,
+            fileUrl,
+            contentType: mimetype,
+            sizeBytes: size,
+            createdBy: visitorId,
+        });
+
+        res.status(201).json(attachmentRecord);
     }),
 );
 
@@ -475,6 +541,60 @@ publicRouter.post(
             }
             throw err;
         }
+    }),
+);
+
+/* ── POST /public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/attachments ── */
+publicRouter.post(
+    '/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/attachments',
+    upload.single('file'),
+    asyncHandler(async (req, res) => {
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const settings = await getBoardSettingsExtended(board.id);
+        const portalUser = await getPortalUser(req);
+
+        if (settings.requireAuthToComment && !portalUser) {
+            res.status(401).json({ error: 'auth_required' });
+            return;
+        }
+
+        if (!req.file) {
+            res.status(400).json({ error: 'missing_file' });
+            return;
+        }
+
+        const ideaId = String(req.params.ideaId);
+        const commentId = String(req.params.commentId);
+        const visitorId = portalUser?.id ?? getVisitorId(req);
+        const { buffer, originalname, mimetype, size } = req.file;
+
+        const fileUrl = await uploadFileBuffer(
+            buffer,
+            originalname,
+            mimetype,
+            `workspaces/${board.workspaceId}/boards/${board.id}/ideas/${ideaId}/comments/${commentId}`
+        );
+
+        const attachmentRecord = await insertCommentAttachment({
+            workspaceId: board.workspaceId,
+            boardId: board.id,
+            ideaId,
+            commentId,
+            fileName: originalname,
+            fileUrl,
+            contentType: mimetype,
+            sizeBytes: size,
+            createdBy: visitorId,
+        });
+
+        res.status(201).json(attachmentRecord);
     }),
 );
 
@@ -809,7 +929,10 @@ publicRouter.post(
         const record = await findPortalUserByEmail(parsed.data.email);
 
         if (record) {
-            const { token } = await createPasswordResetToken({ userId: record.user.id });
+            const { token } = await createPasswordResetToken({
+                userId: record.user.id,
+                userEmail: record.user.email
+            });
             // In a real app, send email here. For now, we just console.log
             console.log(`[DEV] Password reset token for ${record.user.email}: ${token}`);
         }
@@ -851,5 +974,53 @@ publicRouter.post(
         await markResetTokenUsed(parsed.data.token);
 
         res.status(200).json({ ok: true });
+    })
+);
+
+/* ── GET /public/auth/:provider ── */
+publicRouter.get(
+    '/public/auth/:provider',
+    asyncHandler(async (req, res) => {
+        const provider = String(req.params.provider);
+        if (!['github', 'google'].includes(provider)) {
+            res.status(400).send('Invalid provider');
+            return;
+        }
+
+        // Mock OAuth redirect directly to callback with a mock code
+        const apiBase = process.env.VITE_API_URL || 'http://localhost:8080/api/v1';
+        res.redirect(`${apiBase}/public/auth/${provider}/callback?code=mock_code_for_${provider}`);
+    })
+);
+
+/* ── GET /public/auth/:provider/callback ── */
+publicRouter.get(
+    '/public/auth/:provider/callback',
+    asyncHandler(async (req, res) => {
+        const provider = String(req.params.provider);
+        if (!['github', 'google'].includes(provider)) {
+            res.status(400).send('Invalid provider');
+            return;
+        }
+
+        // Mock getting user details
+        const email = `mockuser_${provider}@example.com`;
+        const displayName = `Mock ${provider === 'github' ? 'GitHub' : 'Google'} User`;
+
+        let record = await findPortalUserByEmail(email);
+        if (!record) {
+            const newUser = await createPortalUser({
+                email,
+                displayName,
+                authProvider: provider,
+            });
+            record = { user: newUser, passwordHash: null };
+        }
+
+        const { token } = await createPortalSession({ userId: record.user.id });
+
+        // Redirect back to portal with token.
+        const portalUrl = process.env.VITE_APP_URL || 'http://localhost:3000/portal';
+        res.redirect(`${portalUrl}/auth/callback?token=${token}`);
     })
 );

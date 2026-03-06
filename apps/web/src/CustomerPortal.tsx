@@ -46,6 +46,15 @@ interface IdeaCategory {
     colorHex: string | null;
 }
 
+export interface Attachment {
+    id: string;
+    fileName: string;
+    fileUrl: string;
+    contentType: string;
+    sizeBytes: number;
+    createdAt: string;
+}
+
 interface Idea {
     id: string;
     title: string;
@@ -58,6 +67,7 @@ interface Idea {
     categoryNames: string[];
     createdAt: string;
     updatedAt: string;
+    attachments?: Attachment[];
 }
 
 interface IdeaComment {
@@ -71,6 +81,7 @@ interface IdeaComment {
     viewerHasUpvoted?: boolean;
     parentCommentId?: string | null;
     replies?: IdeaComment[];
+    attachments?: Attachment[];
 }
 
 interface ChangelogEntry {
@@ -271,6 +282,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
 
     /* ── Comment ── */
     const [commentBody, setCommentBody] = useState('');
+    const [commentFile, setCommentFile] = useState<File | null>(null);
     const [commentBusy, setCommentBusy] = useState(false);
     const [replyingTo, setReplyingTo] = useState<IdeaComment | null>(null);
 
@@ -279,6 +291,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
     const [submitTitle, setSubmitTitle] = useState('');
     const [submitDescription, setSubmitDescription] = useState('');
     const [submitCategory, setSubmitCategory] = useState<string>('');
+    const [submitFile, setSubmitFile] = useState<File | null>(null);
     const [submitBusy, setSubmitBusy] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [similarIdeas, setSimilarIdeas] = useState<Idea[]>([]);
@@ -652,8 +665,26 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                 }
 
                 if (res.ok) {
+                    const newComment = await res.json() as IdeaComment;
+
+                    if (commentFile) {
+                        const formData = new FormData();
+                        formData.append('file', commentFile);
+                        const uploadHeaders = { ...authHeaders };
+                        delete uploadHeaders['Content-Type'];
+
+                        try {
+                            await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${selectedIdea.id}/comments/${newComment.id}/attachments`, {
+                                method: 'POST',
+                                headers: uploadHeaders,
+                                body: formData,
+                            });
+                        } catch { /* ignore attachment errors for now */ }
+                    }
+
                     void loadIdeaDetail(selectedIdea.id, detailViewMode);
                     setCommentBody('');
+                    setCommentFile(null);
                     setReplyingTo(null);
                     setSelectedIdea((prev) =>
                         prev ? { ...prev, commentCount: prev.commentCount + 1 } : prev,
@@ -705,10 +736,28 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                 return;
             }
 
+            const newIdea = await res.json() as Idea;
+
+            if (submitFile) {
+                const formData = new FormData();
+                formData.append('file', submitFile);
+                const uploadHeaders = { ...authHeaders };
+                delete uploadHeaders['Content-Type'];
+
+                try {
+                    await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${newIdea.id}/attachments`, {
+                        method: 'POST',
+                        headers: uploadHeaders,
+                        body: formData,
+                    });
+                } catch { /* ignore attachment errors for now */ }
+            }
+
             setShowSubmitModal(false);
             setSubmitTitle('');
             setSubmitDescription('');
             setSubmitCategory('');
+            setSubmitFile(null);
             setSimilarIdeas([]);
             void loadIdeas();
         } catch {
@@ -1379,6 +1428,18 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
 
                             <div className="cp-detail-description">
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedIdea.description}</ReactMarkdown>
+                                {selectedIdea.attachments && selectedIdea.attachments.length > 0 ? (
+                                    <div className="cp-attachments-list" style={{ marginTop: '16px' }}>
+                                        <h4 style={{ fontSize: '0.85rem', color: 'var(--cv-subtle)', marginBottom: '8px' }}>Attachments</h4>
+                                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                            {selectedIdea.attachments.map(att => (
+                                                <a key={att.id} href={att.fileUrl} target="_blank" rel="noopener noreferrer" className="cp-attachment-link" style={{ padding: '6px 10px', background: 'var(--cv-bg-hover)', borderRadius: '6px', fontSize: '0.85rem', color: 'var(--cv-text)', textDecoration: 'none', border: '1px solid var(--cv-border)' }}>
+                                                    📎 {att.fileName}
+                                                </a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
 
                             {selectedIdea.categoryNames.length > 0 ? (
@@ -1447,6 +1508,17 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                                     </div>
                                                     <div className="cp-comment-text">
                                                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{node.body}</ReactMarkdown>
+                                                        {node.attachments && node.attachments.length > 0 ? (
+                                                            <div className="cp-attachments-list" style={{ marginTop: '8px' }}>
+                                                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                                    {node.attachments.map(att => (
+                                                                        <a key={att.id} href={att.fileUrl} target="_blank" rel="noopener noreferrer" className="cp-attachment-link" style={{ padding: '4px 8px', background: 'var(--cv-bg-hover)', borderRadius: '4px', fontSize: '0.75rem', color: 'var(--cv-subtle)', textDecoration: 'none', border: '1px solid var(--cv-border)' }}>
+                                                                            📎 {att.fileName}
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                     <div className="cp-comment-actions">
                                                         <button
@@ -1501,6 +1573,11 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                             rows={3}
                                             disabled={commentBusy}
                                         />
+                                        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--cv-border)', background: 'var(--cv-bg-hover)', display: 'flex', alignItems: 'center', borderBottomLeftRadius: '8px', borderBottomRightRadius: '24px' }}>
+                                            <label style={{ fontSize: '0.75rem', color: 'var(--cv-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                📎 <input type="file" onChange={(e) => setCommentFile(e.target.files?.[0] || null)} style={{ fontSize: '0.75rem', width: '200px' }} />
+                                            </label>
+                                        </div>
                                         <button
                                             className="cp-comment-post-btn"
                                             onClick={() => void onPostComment()}
@@ -1658,10 +1735,20 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                     <div style={{ flex: 1, borderBottom: '1px solid var(--cv-border)' }}></div>
                                 </div>
                                 <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
-                                    <button type="button" className="hero-button ghost" disabled title="Coming Soon" style={{ width: '100%', opacity: 0.7 }}>
+                                    <button
+                                        type="button"
+                                        className="hero-button ghost"
+                                        onClick={() => window.location.href = `${apiBase}/public/auth/google`}
+                                        style={{ width: '100%' }}
+                                    >
                                         Continue with Google
                                     </button>
-                                    <button type="button" className="hero-button ghost" disabled title="Coming Soon" style={{ width: '100%', opacity: 0.7 }}>
+                                    <button
+                                        type="button"
+                                        className="hero-button ghost"
+                                        onClick={() => window.location.href = `${apiBase}/public/auth/github`}
+                                        style={{ width: '100%' }}
+                                    >
                                         Continue with GitHub
                                     </button>
                                 </div>
@@ -1730,6 +1817,15 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                 placeholder="Describe your idea in detail. What problem does it solve?"
                                 rows={5}
                                 maxLength={8000}
+                            />
+                        </div>
+
+                        <div className="cp-form-group">
+                            <label>Attachment (optional)</label>
+                            <input
+                                type="file"
+                                onChange={(e) => setSubmitFile(e.target.files?.[0] || null)}
+                                style={{ fontSize: '0.85rem' }}
                             />
                         </div>
 

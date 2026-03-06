@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import multer from 'multer';
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 import {
   createIdea,
   createIdeaCategory,
@@ -8,7 +10,11 @@ import {
   findBoard,
   findIdea,
   findIdeaById,
+  insertCommentAttachment,
+  insertIdeaAttachment,
+  listCommentAttachments,
   listIdeaAnalytics,
+  listIdeaAttachments,
   listIdeaCategories,
   listIdeaComments,
   listIdeas,
@@ -26,6 +32,7 @@ import {
 } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { emitAudit } from '../lib/audit.js';
+import { uploadFileBuffer } from '../lib/storage.js';
 import {
   ideaModerationStateSchema,
   ideaStatusSchema,
@@ -434,7 +441,45 @@ ideasRouter.get(
       return;
     }
 
-    res.status(200).json(idea);
+    const attachments = await listIdeaAttachments({ workspaceId, ideaId });
+
+    res.status(200).json({ ...idea, attachments });
+  }),
+);
+
+ideasRouter.post(
+  '/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/attachments',
+  requirePermission('idea:write'),
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    const workspaceId = String(req.params.workspaceId);
+    const boardId = String(req.params.boardId);
+    const ideaId = String(req.params.ideaId);
+    const actor = (req as RequestWithActor).actor;
+
+    if (!req.file) {
+      res.status(400).json({ error: 'missing_file' });
+      return;
+    }
+
+    const { buffer, originalname, mimetype, size } = req.file;
+
+    // Upload to S3/MinIO
+    const fileUrl = await uploadFileBuffer(buffer, originalname, mimetype, `workspaces/${workspaceId}/boards/${boardId}/ideas/${ideaId}`);
+
+    // Insert into DB
+    const attachmentRecord = await insertIdeaAttachment({
+      workspaceId,
+      boardId,
+      ideaId,
+      fileName: originalname,
+      fileUrl,
+      contentType: mimetype,
+      sizeBytes: size,
+      createdBy: actor?.userId,
+    });
+
+    res.status(201).json(attachmentRecord);
   }),
 );
 
@@ -615,7 +660,18 @@ ideasRouter.get(
       limit: parsed.data.limit,
     });
 
-    res.status(200).json({ items });
+    // Attach attachments to each comment
+    const itemsWithAttachments = await Promise.all(
+      items.map(async (comment) => {
+        const attachments = await listCommentAttachments({
+          workspaceId,
+          commentId: comment.id,
+        });
+        return { ...comment, attachments };
+      })
+    );
+
+    res.status(200).json({ items: itemsWithAttachments });
   }),
 );
 
@@ -668,6 +724,49 @@ ideasRouter.post(
 
       throw error;
     }
+  }),
+);
+
+ideasRouter.post(
+  '/workspaces/:workspaceId/boards/:boardId/ideas/:ideaId/comments/:commentId/attachments',
+  requirePermission('comment:write'),
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    const workspaceId = String(req.params.workspaceId);
+    const boardId = String(req.params.boardId);
+    const ideaId = String(req.params.ideaId);
+    const commentId = String(req.params.commentId);
+    const actor = (req as RequestWithActor).actor;
+
+    if (!req.file) {
+      res.status(400).json({ error: 'missing_file' });
+      return;
+    }
+
+    const { buffer, originalname, mimetype, size } = req.file;
+
+    // Upload to S3/MinIO
+    const fileUrl = await uploadFileBuffer(
+      buffer,
+      originalname,
+      mimetype,
+      `workspaces/${workspaceId}/boards/${boardId}/ideas/${ideaId}/comments/${commentId}`
+    );
+
+    // Insert into DB
+    const attachmentRecord = await insertCommentAttachment({
+      workspaceId,
+      boardId,
+      ideaId,
+      commentId,
+      fileName: originalname,
+      fileUrl,
+      contentType: mimetype,
+      sizeBytes: size,
+      createdBy: actor?.userId,
+    });
+
+    res.status(201).json(attachmentRecord);
   }),
 );
 

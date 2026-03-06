@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CustomerPortal } from './CustomerPortal';
 import { MarketingSite, getMarketingMetadata, normalizeSitePath } from './MarketingSite';
 import { PortalApp } from './PortalApp';
+import { AdminDashboard } from './AdminDashboard';
 
 function isPortalPath(path: string): boolean {
   return path === '/app' || path.startsWith('/app/');
@@ -9,6 +10,10 @@ function isPortalPath(path: string): boolean {
 
 function isPublicPortalPath(path: string): boolean {
   return path === '/portal' || path.startsWith('/portal/');
+}
+
+function isAdminPath(path: string): boolean {
+  return path === '/admin' || path.startsWith('/admin/');
 }
 
 function upsertMeta(selector: string, attributeName: 'content', value: string): void {
@@ -140,6 +145,10 @@ export function App(): JSX.Element {
 
   if (isPublicPortalPath(rawPath)) {
     return <CustomerPortal path={rawPath} onNavigate={navigate} />;
+  }
+
+  if (isAdminPath(rawPath)) {
+    return <AdminDashboard path={rawPath} onNavigate={navigate} />;
   }
 
   return <MarketingSite path={marketingPath} onNavigate={navigate} />;

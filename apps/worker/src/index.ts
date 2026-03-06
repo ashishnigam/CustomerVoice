@@ -63,10 +63,10 @@ async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promi
 
 async function claimNotificationJob(): Promise<
   | {
-      job: NotificationJob;
-      recipients: NotificationRecipient[];
-      attemptCount: number;
-    }
+    job: NotificationJob;
+    recipients: NotificationRecipient[];
+    attemptCount: number;
+  }
   | null
 > {
   return withTransaction(async (client) => {
@@ -132,6 +132,14 @@ async function claimNotificationJob(): Promise<
 function buildMailContent(job: NotificationJob): { subject: string; text: string } {
   const payload = job.payload ?? {};
   const ideaTitle = typeof payload.ideaTitle === 'string' ? payload.ideaTitle : `Idea ${job.idea_id}`;
+
+  if (job.event_type === 'auth.reset_password') {
+    const resetLink = typeof payload.resetLink === 'string' ? payload.resetLink : '';
+    return {
+      subject: 'Reset your CustomerVoice password',
+      text: `Hello,\n\nYou requested a password reset. Please click the link below to reset your password:\n\n${resetLink}\n\nIf you did not request this, you can safely ignore this email.`,
+    };
+  }
 
   if (job.event_type === 'analytics.outreach') {
     const outreachSubject = typeof payload.subject === 'string' ? payload.subject : `Update on ${ideaTitle}`;

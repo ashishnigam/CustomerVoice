@@ -1754,9 +1754,9 @@ export async function resolveIdeaAudience(params: {
 }
 
 export async function createNotificationJob(params: {
-  workspaceId: string;
-  boardId: string;
-  ideaId: string;
+  workspaceId?: string;
+  boardId?: string;
+  ideaId?: string;
   eventType: string;
   templateId: string;
   payload?: Record<string, unknown>;
@@ -1818,9 +1818,9 @@ export async function createNotificationJob(params: {
       `,
       [
         jobId,
-        params.workspaceId,
-        params.boardId,
-        params.ideaId,
+        params.workspaceId ?? null,
+        params.boardId ?? null,
+        params.ideaId ?? null,
         params.eventType,
         params.templateId,
         JSON.stringify(params.payload ?? {}),
@@ -1849,7 +1849,7 @@ export async function createNotificationJob(params: {
           VALUES ($1, $2, $3, $4, $5, 'pending')
           ON CONFLICT (job_id, email) DO NOTHING
         `,
-        [uuidv4(), jobId, params.workspaceId, recipient.userId, recipient.email.toLowerCase()],
+        [uuidv4(), jobId, params.workspaceId ?? null, recipient.userId ?? null, recipient.email.toLowerCase()],
       );
     }
 
@@ -3198,6 +3198,7 @@ export async function removeCommentUpvote(params: {
 
 export async function createPasswordResetToken(params: {
   userId: string;
+  userEmail: string;
   expiresInMinutes?: number;
 }): Promise<{ token: string; expiresAt: string }> {
   const id = uuidv4();
@@ -3211,6 +3212,19 @@ export async function createPasswordResetToken(params: {
     `,
     [id, params.userId, token, minutes],
   );
+
+  const portalAppUrl = process.env.VITE_APP_URL || 'http://localhost:3000/portal';
+  const resetLink = `${portalAppUrl}/auth/reset-password?token=${token}`;
+
+  await createNotificationJob({
+    eventType: 'auth.reset_password',
+    templateId: 'auth_reset_password_v1',
+    payload: {
+      userId: params.userId,
+      resetLink,
+    },
+    recipients: [{ userId: params.userId, email: params.userEmail }],
+  });
   return {
     token: result.rows[0].token,
     expiresAt: result.rows[0].expires_at,
@@ -3291,4 +3305,259 @@ export async function getBoardSettingsExtended(boardId: string): Promise<BoardSe
     fontFamily: row.font_family ?? null,
     hidePoweredBy: row.hide_powered_by ?? false,
   };
+}
+
+export async function updateBoardSettings(params: {
+  boardId: string;
+  customAccentColor?: string | null;
+  customLogoUrl?: string | null;
+  headerBgColor?: string | null;
+  customCss?: string | null;
+  fontFamily?: string | null;
+  hidePoweredBy?: boolean;
+}): Promise<BoardSettingsExtendedRecord> {
+  let updateParts: string[] = [];
+  let values: unknown[] = [params.boardId];
+  let idx = 2;
+
+  if (params.customAccentColor !== undefined) {
+    updateParts.push(`custom_accent_color = $${idx++}`);
+    values.push(params.customAccentColor);
+  }
+  if (params.customLogoUrl !== undefined) {
+    updateParts.push(`custom_logo_url = $${idx++}`);
+    values.push(params.customLogoUrl);
+  }
+  if (params.headerBgColor !== undefined) {
+    updateParts.push(`header_bg_color = $${idx++}`);
+    values.push(params.headerBgColor);
+  }
+  if (params.customCss !== undefined) {
+    updateParts.push(`custom_css = $${idx++}`);
+    values.push(params.customCss);
+  }
+  if (params.fontFamily !== undefined) {
+    updateParts.push(`font_family = $${idx++}`);
+    values.push(params.fontFamily);
+  }
+  if (params.hidePoweredBy !== undefined) {
+    updateParts.push(`hide_powered_by = $${idx++}`);
+    values.push(params.hidePoweredBy);
+  }
+
+  if (updateParts.length === 0) {
+    return getBoardSettingsExtended(params.boardId);
+  }
+
+  const result = await query<BoardSettingsExtendedRecord>(
+    `
+      UPDATE board_settings
+      SET ${updateParts.join(', ')}
+      WHERE board_id = $1
+      RETURNING
+        board_id as "boardId",
+        access_mode as "accessMode",
+        require_auth_to_vote as "requireAuthToVote",
+        require_auth_to_comment as "requireAuthToComment",
+        require_auth_to_submit as "requireAuthToSubmit",
+        allow_anonymous_ideas as "allowAnonymousIdeas",
+        enable_idea_submission as "enableIdeaSubmission",
+        enable_commenting as "enableCommenting",
+        show_vote_count as "showVoteCount",
+        show_status_filter as "showStatusFilter",
+        show_category_filter as "showCategoryFilter",
+        portal_title as "portalTitle",
+        welcome_message as "welcomeMessage",
+        custom_accent_color as "customAccentColor",
+        custom_logo_url as "customLogoUrl",
+        header_bg_color as "headerBgColor",
+        custom_css as "customCss",
+        font_family as "fontFamily",
+        hide_powered_by as "hidePoweredBy"
+    `,
+    values
+  );
+
+  return result.rows[0];
+}
+
+/* ── Idea Attachments ── */
+export interface IdeaAttachmentRecord {
+  id: string;
+  workspaceId: string;
+  boardId: string;
+  ideaId: string;
+  fileName: string;
+  fileUrl: string;
+  contentType: string;
+  sizeBytes: number;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export async function insertIdeaAttachment(params: {
+  workspaceId: string;
+  boardId: string;
+  ideaId: string;
+  fileName: string;
+  fileUrl: string;
+  contentType: string;
+  sizeBytes: number;
+  createdBy?: string;
+}): Promise<IdeaAttachmentRecord> {
+  const id = uuidv4();
+  const result = await query(
+    `
+      INSERT INTO idea_attachments (
+        id, workspace_id, board_id, idea_id, file_name, file_url, content_type, size_bytes, created_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `,
+    [
+      id,
+      params.workspaceId,
+      params.boardId,
+      params.ideaId,
+      params.fileName,
+      params.fileUrl,
+      params.contentType,
+      params.sizeBytes,
+      params.createdBy ?? null,
+    ]
+  );
+
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    boardId: row.board_id,
+    ideaId: row.idea_id,
+    fileName: row.file_name,
+    fileUrl: row.file_url,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listIdeaAttachments(params: {
+  workspaceId: string;
+  ideaId: string;
+}): Promise<IdeaAttachmentRecord[]> {
+  const result = await query(
+    `
+      SELECT * FROM idea_attachments 
+      WHERE workspace_id = $1 AND idea_id = $2
+      ORDER BY created_at ASC
+    `,
+    [params.workspaceId, params.ideaId]
+  );
+
+  return result.rows.map(row => ({
+    id: row.id,
+    workspaceId: row.workspace_id,
+    boardId: row.board_id,
+    ideaId: row.idea_id,
+    fileName: row.file_name,
+    fileUrl: row.file_url,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  }));
+}
+
+/* ── Comment Attachments ── */
+export interface CommentAttachmentRecord {
+  id: string;
+  workspaceId: string;
+  boardId: string;
+  ideaId: string;
+  commentId: string;
+  fileName: string;
+  fileUrl: string;
+  contentType: string;
+  sizeBytes: number;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export async function insertCommentAttachment(params: {
+  workspaceId: string;
+  boardId: string;
+  ideaId: string;
+  commentId: string;
+  fileName: string;
+  fileUrl: string;
+  contentType: string;
+  sizeBytes: number;
+  createdBy?: string;
+}): Promise<CommentAttachmentRecord> {
+  const id = uuidv4();
+  const result = await query(
+    `
+      INSERT INTO comment_attachments (
+        id, workspace_id, board_id, idea_id, comment_id, file_name, file_url, content_type, size_bytes, created_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+    `,
+    [
+      id,
+      params.workspaceId,
+      params.boardId,
+      params.ideaId,
+      params.commentId,
+      params.fileName,
+      params.fileUrl,
+      params.contentType,
+      params.sizeBytes,
+      params.createdBy ?? null,
+    ]
+  );
+
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    boardId: row.board_id,
+    ideaId: row.idea_id,
+    commentId: row.comment_id,
+    fileName: row.file_name,
+    fileUrl: row.file_url,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listCommentAttachments(params: {
+  workspaceId: string;
+  commentId: string;
+}): Promise<CommentAttachmentRecord[]> {
+  const result = await query(
+    `
+      SELECT * FROM comment_attachments 
+      WHERE workspace_id = $1 AND comment_id = $2
+      ORDER BY created_at ASC
+    `,
+    [params.workspaceId, params.commentId]
+  );
+
+  return result.rows.map(row => ({
+    id: row.id,
+    workspaceId: row.workspace_id,
+    boardId: row.board_id,
+    ideaId: row.idea_id,
+    commentId: row.comment_id,
+    fileName: row.file_name,
+    fileUrl: row.file_url,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  }));
 }

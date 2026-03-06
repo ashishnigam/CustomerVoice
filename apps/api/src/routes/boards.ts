@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createBoard, findBoard, listBoards, updateBoard, workspaceExists } from '../db/repositories.js';
+import { createBoard, findBoard, listBoards, updateBoard, workspaceExists, updateBoardSettings } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { emitAudit } from '../lib/audit.js';
 import { enforceWorkspaceScope, requirePermission, type RequestWithActor } from '../middleware/auth.js';
@@ -24,8 +24,24 @@ const updateBoardSchema = z
     message: 'at least one field is required',
   });
 
+const updateBoardSettingsSchema = z.object({
+  customAccentColor: z.string().nullable().optional(),
+  customLogoUrl: z.string().nullable().optional(),
+  headerBgColor: z.string().nullable().optional(),
+  customCss: z.string().nullable().optional(),
+  fontFamily: z.string().nullable().optional(),
+  hidePoweredBy: z.boolean().optional(),
+});
+
 const listQuerySchema = z.object({
   includeInactive: z.coerce.boolean().optional(),
+});
+
+const createChangelogSchema = z.object({
+  title: z.string().min(3).max(180),
+  body: z.string().min(5).max(8000),
+  entryType: z.enum(['feature', 'improvement', 'bugfix']),
+  publishedAt: z.string().datetime().optional()
 });
 
 export const boardsRouter = Router();
@@ -145,4 +161,89 @@ boardsRouter.patch(
 
     res.status(200).json(updated);
   }),
+);
+
+boardsRouter.patch(
+  '/workspaces/:workspaceId/boards/:boardId/settings',
+  requirePermission('board:write'),
+  asyncHandler(async (req, res) => {
+    const parsed = updateBoardSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload', details: parsed.error.flatten() });
+      return;
+    }
+
+    const boardId = String(req.params.boardId);
+    // Note: workspaceId must match the board, verify the board actually exists in this workspace
+    const workspaceId = String(req.params.workspaceId);
+    const board = await findBoard({ workspaceId, boardId });
+    if (!board) {
+      res.status(404).json({ error: 'board_not_found' });
+      return;
+    }
+
+    const updatedSettings = await updateBoardSettings({
+      boardId,
+      customAccentColor: parsed.data.customAccentColor,
+      customLogoUrl: parsed.data.customLogoUrl,
+      headerBgColor: parsed.data.headerBgColor,
+      customCss: parsed.data.customCss,
+      fontFamily: parsed.data.fontFamily,
+      hidePoweredBy: parsed.data.hidePoweredBy,
+    });
+
+    await emitAudit(req, 'board.settings.update', {
+      boardId,
+      fields: Object.keys(parsed.data),
+    });
+
+    res.status(200).json(updatedSettings);
+  }),
+);
+
+boardsRouter.post(
+  '/workspaces/:workspaceId/boards/:boardId/changelogs',
+  requirePermission('board:write'), // Admin right for boards covers changelogs
+  asyncHandler(async (req, res) => {
+    const parsed = createChangelogSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload', details: parsed.error.flatten() });
+      return;
+    }
+
+    const { createChangelogEntry } = await import('../db/repositories.js');
+
+    const workspaceId = String(req.params.workspaceId);
+    const boardId = String(req.params.boardId);
+
+    // Make sure actor exists
+    const actor = (req as RequestWithActor).actor;
+    if (!actor) {
+      res.status(401).json({ error: 'actor_required' });
+      return;
+    }
+
+    const board = await findBoard({ workspaceId, boardId });
+    if (!board) {
+      res.status(404).json({ error: 'board_not_found' });
+      return;
+    }
+
+    const entry = await createChangelogEntry({
+      workspaceId,
+      boardId,
+      title: parsed.data.title,
+      body: parsed.data.body,
+      entryType: parsed.data.entryType,
+      createdBy: actor.userId,
+      publishedAt: parsed.data.publishedAt ? new Date(parsed.data.publishedAt).toISOString() : new Date().toISOString()
+    });
+
+    await emitAudit(req, 'board.changelog.create', {
+      boardId,
+      entryId: entry.id,
+    });
+
+    res.status(201).json(entry);
+  })
 );
