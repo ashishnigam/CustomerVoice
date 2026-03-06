@@ -23,7 +23,12 @@ CustomerVoice is a modern, transparent, and highly responsive feedback portal th
 - **Threaded Comments:** Support for nested replies and comment upvoting to foster richer discussions.
 - **Markdown Support:** React-Markdown and remark-gfm allow formatting in idea descriptions and comments.
 - **Custom Branding:** Board settings reflect custom accent colors, logos, and header backgrounds dynamically.
-- **Auth Gap Fixes:** Fully functional password reset flow and UI stubs for Google/GitHub OAuth.
+
+### Phase 4: Admin, Auth & Notifications
+- **Admin Dashboard:** Internal UI (`/admin`) to configure board settings, update statuses, and draft Changelogs with a rich text editor.
+- **Social Auth:** Fully implemented Google and GitHub OAuth callbacks issuing JWTs.
+- **Background Worker:** A polling worker in `apps/worker` dispatches emails (e.g., Password Reset, Notifications) using Nodemailer/SMTP.
+- **File Attachments:** Natively upload screenshots and documentation to ideas and comments via multipart form data to AWS S3 / Minio.
 
 ## 3. Architecture Overview
 
@@ -41,11 +46,12 @@ The project uses Turborepo for workspace management.
 - Routes are validated using JSON Schema (TypeBox/Zod integration).
 - Authentication uses bearer JWTs or secure session tokens.
 
-## 4. Future Backlog (Phase 4 & Beyond)
-- **SSO Integration:** Full SAML/OIDC and OAuth (Google, GitHub, Slack) implementations.
-- **Admin Dashboard:** A robust internal UI for staff to manage user access, define board settings, moderate comments, and update idea statuses.
-- **Notification Worker:** Implement BullMQ/Redis in `apps/worker` to process email notifications for password resets and subscribed idea updates via Resend/SendGrid.
-- **File Attachments:** Allow users to upload screenshots and PDFs to their idea submissions.
-- **Webhooks:** Trigger external events when new ideas are posted or statuses change (schema exists, delivery mechanism pending).
-- **Rich Text Editor:** Add a WYSIWYG editor for admins creating changelogs.
-- **Testing Suite:** Add extensive end-to-end tests (Playwright/Cypress) and integration tests.
+## 4. Future Backlog (Phase 5: Moderation & Integrations)
+- **Idea Merging (Priority):** Admin ability to merge duplicate ideas to consolidate votes and followers.
+- **Internal Comments (Priority):** Staff-only notes on public ideas that customers cannot see.
+- **Webhooks & External Integrations:** Send updates to Slack, Discord, Jira, or Linear. Support bidirectional status syncs.
+- **Embeddable Widget:** A lightweight React script that can be embedded securely on any customer website to open a feedback modal without leaving the host application.
+- **Real-time UX:** Implement Server-Sent Events (SSE) or WebSockets so the board vote counters and comments feel alive and auto-refresh.
+- **User Impact / MRR Tracking:** Connect users to Stripe or Salesforce IDs to weigh votes by Total Revenue at Risk.
+- **Enterprise SSO:** Support SAML or OIDC for corporate identity providers.
+- **Automated E2E Testing Suite:** Prevent UI regressions using Playwright or Cypress workflows against the public portal.

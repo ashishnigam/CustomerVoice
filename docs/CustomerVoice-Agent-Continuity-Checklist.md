@@ -9,34 +9,34 @@ This document serves as an entry point for any AI agent tasked with continuing d
 - **Backend (`apps/api`):** Fastify, Drizzle ORM, PostgreSQL. Main logic is routed through `routes/public.ts`, mapping to database actions in `db/repositories.ts`. 
 
 ## Current Implementation State
-- ✅ **Phases 1-3 Completed:** Authentication, Idea submission, Commenting, Threaded Comments, Roadmap View, Changelog View, Custom Branding, Markdown Rendering, and Password Reset flow.
-- ✅ **Database:** Up to migration `007_platform_excellence` applied. Schema supports all current features plus placeholders for Webhooks.
-- 🚧 **Gap:** The frontend Customer Portal is highly refined, but the internal Admin Dashboard for managing these settings, modifying idea statuses, and creating changelogs is missing.
-- 🚧 **Gap:** No actual email dispatch mechanism exists yet (password reset token currently operates silently on the backend).
+- ✅ **Phases 1-4 Completed:** Authentication, Idea submission, Commenting, Roadmap View, Changelog View, Custom Branding, Password Reset, Social Auth (Google/GitHub), Background Worker Email Dispatch, Admin Dashboard (Rich Text Editorial), and File Attachments.
+- ✅ **Database:** Schemas support all features, including Webhook definitions.
+- 🚧 **Gap (Phase 5):** Admins cannot merge duplicate ideas. High-end integrations (Slack, Linear, Jira) via Webhooks are not yet connected to the worker. Internal-only staff comments are not supported.
 
-## Next Steps: Phase 4 Implementation Checklist
+## Next Steps: Phase 5 Implementation Checklist (Moderation & Integrations)
 
-### 1. Robust Email & Notifications
-- [ ] Setup a background worker (`apps/worker`) using BullMQ/Redis or a simple cron job.
-- [ ] Integrate an email provider (Resend, SendGrid, Amazon SES).
-- [ ] Connect the `forgot-password` route to actually dispatch an email containing the reset link (`/portal/boards/:boardSlug?reset_token=...`).
-- [ ] Dispatch email notifications to users subscribed to an idea when its status changes.
+### 1. Idea Merging & Deduplication
+- [ ] Implement `mergeIdeas` repository function to re-parent comments, votes, and followers from a duplicate idea to a primary idea.
+- [ ] Add an Admin UI workflow to initiate a merge, selecting the source and target ideas.
+- [ ] Add UX on the primary idea showing "Merged with <duplicate URL>".
 
-### 2. Admin & Staff Dashboard
-- [ ] Create `apps/web/src/AdminDashboard.tsx`.
-- [ ] Build UI to manage Board Settings (custom CSS, logos, access control).
-- [ ] Build UI for staff to change Idea Statuses (moves them across the public roadmap).
-- [ ] Build UI to draft and publish Changelog Entries.
-- [ ] Ensure Admin routes in `apps/api` are securely protected using staff/admin role checks.
+### 2. Internal Staff Comments
+- [ ] Add an `is_internal` boolean column to the `idea_comments` schema.
+- [ ] Modify `public.ts` comments fetch mechanism to omit internal comments unless the requester is an authenticated staff member.
+- [ ] Add a visual toggle in the Admin Dashboard and Customer Portal for Staff to choose "Post as Internal Note".
 
-### 3. Authentication Enhancements
-- [ ] Implement actual OAuth logic in Fastify for Google and GitHub.
-- [ ] Remove the UI stubs in `CustomerPortal.tsx` and connect them to real OAuth scopes.
+### 3. Webhooks & External Routing
+- [ ] Implement the UI in `AdminDashboard.tsx` to CRUD Webhooks (Slack/Discord format).
+- [ ] When an idea is created, updated, or commented on, enqueue a webhook payload to the `notification_jobs` table (similar to how emails are dispatched).
+- [ ] Update `apps/worker` to process webhook notification jobs.
 
-### 4. Technical Debt & Refactoring
-- [ ] `CustomerPortal.tsx` is over 1,600 lines. Refactor it by extracting smaller components (e.g., `IdeaDetailPanel`, `RoadmapBoard`, `ChangelogTimeline`, `AuthModal`).
-- [ ] `styles.css` is over 4,700 lines. Consider splitting it into logical CSS modules or adopting a styling framework if appropriate.
-- [ ] Add unit logic tests and API integration tests.
+### 4. Real-time UX (Optional / High-Impact)
+- [ ] Introduce Server-Sent Events (SSE) or WebSockets in the fastify backend.
+- [ ] Broadcast vote increments and new comments to connected portal clients so vote counters tick up live without refreshing.
+
+### 5. Automated E2E Testing
+- [ ] Setup Playwright in the monorepo root.
+- [ ] Write critical path E2E tests for the public portal: Registration, Idea Submission, Upvoting, and Commenting.
 
 ## Local Development Commands
 To work on the project, you typically need to run the entire monorepo:
