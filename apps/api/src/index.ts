@@ -1,7 +1,15 @@
-import { createApp } from './app.js';
-import { closePool } from './db/client.js';
-import { runBootstrapSeed } from './db/bootstrap-seed.js';
-import { runMigrations } from './db/migrations.js';
+import { loadLocalEnv } from './lib/load-env.js';
+
+loadLocalEnv();
+
+const [{ createApp }, { closePool }, { runBootstrapSeed }, { runMigrations }] =
+  await Promise.all([
+    import('./app.js'),
+    import('./db/client.js'),
+    import('./db/bootstrap-seed.js'),
+    import('./db/migrations.js'),
+  ]);
+
 const app = createApp();
 const port = Number(process.env.PORT ?? 4000);
 

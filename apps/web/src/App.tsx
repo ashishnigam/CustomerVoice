@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CustomerPortal } from './CustomerPortal';
 import { MarketingSite, getMarketingMetadata, normalizeSitePath } from './MarketingSite';
 import { PortalApp } from './PortalApp';
 
 function isPortalPath(path: string): boolean {
   return path === '/app' || path.startsWith('/app/');
+}
+
+function isPublicPortalPath(path: string): boolean {
+  return path === '/portal' || path.startsWith('/portal/');
 }
 
 function upsertMeta(selector: string, attributeName: 'content', value: string): void {
@@ -131,6 +136,10 @@ export function App(): JSX.Element {
 
   if (isPortalPath(rawPath)) {
     return <PortalApp path={rawPath} onNavigate={navigate} />;
+  }
+
+  if (isPublicPortalPath(rawPath)) {
+    return <CustomerPortal path={rawPath} onNavigate={navigate} />;
   }
 
   return <MarketingSite path={marketingPath} onNavigate={navigate} />;

@@ -6,6 +6,7 @@ import { boardsRouter } from './routes/boards.js';
 import { healthRouter } from './routes/health.js';
 import { ideasRouter } from './routes/ideas.js';
 import { membersRouter } from './routes/members.js';
+import { publicRouter } from './routes/public.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -14,6 +15,10 @@ export function createApp(): express.Express {
   app.use(express.json());
   app.use(healthRouter);
 
+  // Public routes (no auth required)
+  app.use('/api/v1', publicRouter);
+
+  // Authenticated routes
   app.use('/api/v1', requireActor, boardsRouter);
   app.use('/api/v1', requireActor, ideasRouter);
   app.use('/api/v1', requireActor, membersRouter);

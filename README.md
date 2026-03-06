@@ -87,12 +87,21 @@ cp apps/worker/.env.example apps/worker/.env
 cp apps/mobile/.env.example apps/mobile/.env
 ```
 
-3. Start local infra and services:
+3. Start local infra:
 ```bash
-POSTGRES_PORT=55432 docker compose -f infra/docker/docker-compose.yml up -d postgres redis mailhog minio
-DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm --filter @customervoice/api db:migrate
+pnpm infra:up
+```
+
+4. Start the product stack:
+```bash
 pnpm dev
 ```
+
+`pnpm dev` now starts the core product stack only: `api`, `web`, and `worker`.
+
+Use `pnpm dev:all` if you also want Expo mobile running.
+
+Node services automatically load env values from workspace-root `.env` and per-app `.env` files.
 
 Default local URLs:
 - Website: `http://localhost:3000`
@@ -101,10 +110,16 @@ Default local URLs:
 - API health: `http://localhost:4000/health`
 - MailHog UI: `http://localhost:8025`
 
-If local port `5432` is already in use, keep using `POSTGRES_PORT=55432` and run host-side DB commands with:
+If port `3000` is already occupied, Vite will automatically move the web app to the next free port, typically `3001`.
+
+If local port `5432` is already in use, use `55432` for Docker Postgres:
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm --filter @customervoice/api db:migrate
+POSTGRES_PORT=55432 pnpm infra:up
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm dev:api
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm dev:worker
 ```
+
+For the full operational runbook, see `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Local-Runbook.md`.
 
 ## Auth modes
 ### `AUTH_MODE=mock` (local default)
@@ -112,6 +127,7 @@ API accepts actor headers from web shell. Use seeded values:
 - `workspace_id`: `22222222-2222-2222-2222-222222222222`
 - `user_id`: `33333333-3333-3333-3333-333333333333`
 - `role`: `workspace_admin`
+- `email`: `admin@customervoice.local`
 
 Additional seeded memberships used in tests:
 - contributor `44444444-4444-4444-4444-444444444444`
@@ -138,6 +154,11 @@ Docker Compose already points worker SMTP to `mailhog:1025`.
 
 ## Common commands
 ```bash
+pnpm infra:up
+pnpm infra:down
+pnpm dev:api
+pnpm dev:web
+pnpm dev:worker
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -158,15 +179,16 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice pnpm --
 
 ## Manual test flow
 1. Open `http://localhost:3000` for the marketing website or `http://localhost:3000/app` for the application shell.
-2. Sign in with mock admin values in the app shell.
-3. Create a board and confirm the app moves to `/app/boards/:slug`.
-4. Create categories.
-5. Create ideas and tag them.
-6. Verify search, status filter, category filter, and sort modes.
-7. Upvote/comment as contributor.
-8. Use `Moderation` tab to lock comments or merge duplicates.
-9. Use `Analytics` tab to save RICE/revenue inputs, export CSV, and enqueue outreach.
-10. Move an idea to `completed` and check MailHog for notification delivery.
+2. Use the API health check on the sign-in screen if the backend looks unavailable.
+3. Sign in with the seeded mock admin values in the app shell.
+4. Create a board and confirm the app moves to `/app/boards/:slug`.
+5. Create categories.
+6. Create ideas and tag them.
+7. Verify search, status filter, category filter, and sort modes.
+8. Upvote/comment as contributor.
+9. Use `Moderation Ops` to lock comments or merge duplicates.
+10. Use `Insights` to save RICE/revenue inputs, export CSV, and enqueue outreach.
+11. Move an idea to `completed` and check MailHog for notification delivery.
 
 ## API surface (current)
 See `/Users/ashishnigam/Startups/CustomerVoice/apps/api/openapi/openapi.yaml`.

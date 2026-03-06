@@ -1,5 +1,11 @@
-import { closePool } from './client.js';
-import { runMigrations } from './migrations.js';
+import { loadLocalEnv } from '../lib/load-env.js';
+
+loadLocalEnv();
+
+const [{ closePool }, { runMigrations }] = await Promise.all([
+  import('./client.js'),
+  import('./migrations.js'),
+]);
 
 async function main(): Promise<void> {
   await runMigrations();

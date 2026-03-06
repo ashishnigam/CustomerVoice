@@ -64,6 +64,8 @@ interface IdeaCommentRow {
   user_email: string;
   body: string;
   active: boolean;
+  is_official: boolean;
+  is_team_member: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -198,6 +200,8 @@ export interface IdeaCommentRecord {
   userEmail: string;
   body: string;
   active: boolean;
+  isOfficial: boolean;
+  isTeamMember: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -359,6 +363,8 @@ function mapIdeaComment(row: IdeaCommentRow): IdeaCommentRecord {
     userEmail: row.user_email,
     body: row.body,
     active: row.active,
+    isOfficial: row.is_official ?? false,
+    isTeamMember: row.is_team_member ?? false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -553,6 +559,38 @@ export async function findBoard(params: {
   return (result.rowCount ?? 0) === 0 ? null : mapBoard(result.rows[0]);
 }
 
+export async function findBoardBySlug(params: {
+  slug: string;
+  onlyPublic?: boolean;
+}): Promise<BoardRecord | null> {
+  const onlyPublic = params.onlyPublic ?? true;
+  const result = await query<BoardRow>(
+    `
+      SELECT
+        id,
+        workspace_id,
+        slug,
+        name,
+        description,
+        visibility,
+        active,
+        created_by,
+        created_at,
+        updated_at
+      FROM boards
+      WHERE (slug = $1 OR slug LIKE $1 || '-%')
+        AND active = TRUE
+        AND ($2::boolean = FALSE OR visibility = 'public')
+      ORDER BY
+        CASE WHEN slug = $1 THEN 0 ELSE 1 END
+      LIMIT 1
+    `,
+    [params.slug, onlyPublic],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapBoard(result.rows[0]);
+}
+
 export async function createBoard(params: {
   workspaceId: string;
   name: string;
@@ -667,11 +705,13 @@ export async function listIdeas(params: {
   categoryIds?: string[];
   sort?: IdeaSortMode;
   limit?: number;
+  offset?: number;
   viewerId?: string;
 }): Promise<IdeaRecord[]> {
   const includeInactive = params.includeInactive ?? false;
   const includeModerated = params.includeModerated ?? false;
   const clampedLimit = Math.max(1, Math.min(params.limit ?? 100, 200));
+  const clampedOffset = Math.max(0, params.offset ?? 0);
   const search = params.search?.trim();
   const normalizedCategoryIds =
     params.categoryIds && params.categoryIds.length > 0 ? params.categoryIds : null;
@@ -771,6 +811,7 @@ export async function listIdeas(params: {
         COALESCE(c.comment_count, 0) DESC,
         i.created_at DESC
       LIMIT $6
+      OFFSET $12
     `,
     [
       params.workspaceId,
@@ -784,6 +825,7 @@ export async function listIdeas(params: {
       params.moderationState ?? null,
       includeModerated,
       sort,
+      clampedOffset,
     ],
   );
 
@@ -1125,12 +1167,14 @@ export async function listIdeaComments(params: {
         u.email AS user_email,
         c.body,
         c.active,
+        c.is_official,
+        c.is_team_member,
         c.created_at,
         c.updated_at
       FROM idea_comments c
       JOIN users u ON u.id = c.user_id
       WHERE c.workspace_id = $1 AND c.idea_id = $2 AND c.active = TRUE
-      ORDER BY c.created_at ASC
+      ORDER BY c.is_official DESC, c.created_at ASC
       LIMIT $3
     `,
     [params.workspaceId, params.ideaId, clampedLimit],
@@ -2325,4 +2369,926 @@ export async function getPermissionOverride(params: {
   }
 
   return result.rows[0].effect;
+}
+
+/* ── Board Settings ── */
+
+export type PortalAccessMode = 'public' | 'link_only' | 'private' | 'domain_restricted';
+
+export interface BoardSettingsRecord {
+  boardId: string;
+  accessMode: PortalAccessMode;
+  allowedDomains: string[];
+  allowedEmails: string[];
+  requireAuthToVote: boolean;
+  requireAuthToComment: boolean;
+  requireAuthToSubmit: boolean;
+  allowAnonymousIdeas: boolean;
+  customLogoUrl: string | null;
+  customAccentColor: string | null;
+  portalTitle: string | null;
+  showVoteCount: boolean;
+  showStatusFilter: boolean;
+  showCategoryFilter: boolean;
+  enableIdeaSubmission: boolean;
+  enableCommenting: boolean;
+  welcomeMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface BoardSettingsRow {
+  board_id: string;
+  access_mode: PortalAccessMode;
+  allowed_domains: string[];
+  allowed_emails: string[];
+  require_auth_to_vote: boolean;
+  require_auth_to_comment: boolean;
+  require_auth_to_submit: boolean;
+  allow_anonymous_ideas: boolean;
+  custom_logo_url: string | null;
+  custom_accent_color: string | null;
+  portal_title: string | null;
+  show_vote_count: boolean;
+  show_status_filter: boolean;
+  show_category_filter: boolean;
+  enable_idea_submission: boolean;
+  enable_commenting: boolean;
+  welcome_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapBoardSettings(row: BoardSettingsRow): BoardSettingsRecord {
+  return {
+    boardId: row.board_id,
+    accessMode: row.access_mode,
+    allowedDomains: row.allowed_domains ?? [],
+    allowedEmails: row.allowed_emails ?? [],
+    requireAuthToVote: row.require_auth_to_vote,
+    requireAuthToComment: row.require_auth_to_comment,
+    requireAuthToSubmit: row.require_auth_to_submit,
+    allowAnonymousIdeas: row.allow_anonymous_ideas,
+    customLogoUrl: row.custom_logo_url,
+    customAccentColor: row.custom_accent_color,
+    portalTitle: row.portal_title,
+    showVoteCount: row.show_vote_count,
+    showStatusFilter: row.show_status_filter,
+    showCategoryFilter: row.show_category_filter,
+    enableIdeaSubmission: row.enable_idea_submission,
+    enableCommenting: row.enable_commenting,
+    welcomeMessage: row.welcome_message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+const defaultBoardSettings: BoardSettingsRecord = {
+  boardId: '',
+  accessMode: 'public',
+  allowedDomains: [],
+  allowedEmails: [],
+  requireAuthToVote: false,
+  requireAuthToComment: true,
+  requireAuthToSubmit: true,
+  allowAnonymousIdeas: false,
+  customLogoUrl: null,
+  customAccentColor: null,
+  portalTitle: null,
+  showVoteCount: true,
+  showStatusFilter: true,
+  showCategoryFilter: true,
+  enableIdeaSubmission: true,
+  enableCommenting: true,
+  welcomeMessage: null,
+  createdAt: '',
+  updatedAt: '',
+};
+
+export async function getBoardSettings(boardId: string): Promise<BoardSettingsRecord> {
+  const result = await query<BoardSettingsRow>(
+    `SELECT * FROM board_settings WHERE board_id = $1 LIMIT 1`,
+    [boardId],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    return { ...defaultBoardSettings, boardId };
+  }
+
+  return mapBoardSettings(result.rows[0]);
+}
+
+export async function upsertBoardSettings(params: {
+  boardId: string;
+  accessMode?: PortalAccessMode;
+  allowedDomains?: string[];
+  allowedEmails?: string[];
+  requireAuthToVote?: boolean;
+  requireAuthToComment?: boolean;
+  requireAuthToSubmit?: boolean;
+  allowAnonymousIdeas?: boolean;
+  customLogoUrl?: string | null;
+  customAccentColor?: string | null;
+  portalTitle?: string | null;
+  showVoteCount?: boolean;
+  showStatusFilter?: boolean;
+  showCategoryFilter?: boolean;
+  enableIdeaSubmission?: boolean;
+  enableCommenting?: boolean;
+  welcomeMessage?: string | null;
+}): Promise<BoardSettingsRecord> {
+  const result = await query<BoardSettingsRow>(
+    `
+      INSERT INTO board_settings (
+        board_id, access_mode, allowed_domains, allowed_emails,
+        require_auth_to_vote, require_auth_to_comment, require_auth_to_submit,
+        allow_anonymous_ideas, custom_logo_url, custom_accent_color,
+        portal_title, show_vote_count, show_status_filter, show_category_filter,
+        enable_idea_submission, enable_commenting, welcome_message
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ON CONFLICT (board_id) DO UPDATE SET
+        access_mode = COALESCE($2, board_settings.access_mode),
+        allowed_domains = COALESCE($3, board_settings.allowed_domains),
+        allowed_emails = COALESCE($4, board_settings.allowed_emails),
+        require_auth_to_vote = COALESCE($5, board_settings.require_auth_to_vote),
+        require_auth_to_comment = COALESCE($6, board_settings.require_auth_to_comment),
+        require_auth_to_submit = COALESCE($7, board_settings.require_auth_to_submit),
+        allow_anonymous_ideas = COALESCE($8, board_settings.allow_anonymous_ideas),
+        custom_logo_url = COALESCE($9, board_settings.custom_logo_url),
+        custom_accent_color = COALESCE($10, board_settings.custom_accent_color),
+        portal_title = COALESCE($11, board_settings.portal_title),
+        show_vote_count = COALESCE($12, board_settings.show_vote_count),
+        show_status_filter = COALESCE($13, board_settings.show_status_filter),
+        show_category_filter = COALESCE($14, board_settings.show_category_filter),
+        enable_idea_submission = COALESCE($15, board_settings.enable_idea_submission),
+        enable_commenting = COALESCE($16, board_settings.enable_commenting),
+        welcome_message = COALESCE($17, board_settings.welcome_message),
+        updated_at = NOW()
+      RETURNING *
+    `,
+    [
+      params.boardId,
+      params.accessMode ?? 'public',
+      params.allowedDomains ?? [],
+      params.allowedEmails ?? [],
+      params.requireAuthToVote ?? false,
+      params.requireAuthToComment ?? true,
+      params.requireAuthToSubmit ?? true,
+      params.allowAnonymousIdeas ?? false,
+      params.customLogoUrl ?? null,
+      params.customAccentColor ?? null,
+      params.portalTitle ?? null,
+      params.showVoteCount ?? true,
+      params.showStatusFilter ?? true,
+      params.showCategoryFilter ?? true,
+      params.enableIdeaSubmission ?? true,
+      params.enableCommenting ?? true,
+      params.welcomeMessage ?? null,
+    ],
+  );
+
+  return mapBoardSettings(result.rows[0]);
+}
+
+/* ── Portal Users & Sessions ── */
+
+export interface PortalUserRecord {
+  id: string;
+  email: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  authProvider: string;
+  emailVerified: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface PortalUserRow {
+  id: string;
+  email: string;
+  display_name: string | null;
+  password_hash: string | null;
+  avatar_url: string | null;
+  auth_provider: string;
+  provider_id: string | null;
+  email_verified: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapPortalUser(row: PortalUserRow): PortalUserRecord {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    avatarUrl: row.avatar_url,
+    authProvider: row.auth_provider,
+    emailVerified: row.email_verified,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function createPortalUser(params: {
+  email: string;
+  displayName?: string;
+  passwordHash?: string;
+  authProvider?: string;
+  providerId?: string;
+}): Promise<PortalUserRecord> {
+  const id = uuidv4();
+  const result = await query<PortalUserRow>(
+    `
+      INSERT INTO portal_users (id, email, display_name, password_hash, auth_provider, provider_id)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `,
+    [
+      id,
+      params.email.toLowerCase().trim(),
+      params.displayName ?? null,
+      params.passwordHash ?? null,
+      params.authProvider ?? 'email',
+      params.providerId ?? null,
+    ],
+  );
+
+  return mapPortalUser(result.rows[0]);
+}
+
+export async function findPortalUserByEmail(email: string): Promise<{
+  user: PortalUserRecord;
+  passwordHash: string | null;
+} | null> {
+  const result = await query<PortalUserRow>(
+    `SELECT * FROM portal_users WHERE email = $1 LIMIT 1`,
+    [email.toLowerCase().trim()],
+  );
+
+  if ((result.rowCount ?? 0) === 0) return null;
+
+  return {
+    user: mapPortalUser(result.rows[0]),
+    passwordHash: result.rows[0].password_hash,
+  };
+}
+
+export async function findPortalUserById(userId: string): Promise<PortalUserRecord | null> {
+  const result = await query<PortalUserRow>(
+    `SELECT * FROM portal_users WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+
+  if ((result.rowCount ?? 0) === 0) return null;
+  return mapPortalUser(result.rows[0]);
+}
+
+export async function createPortalSession(params: {
+  userId: string;
+  expiresInHours?: number;
+}): Promise<{ token: string; expiresAt: string }> {
+  const id = uuidv4();
+  const token = `ps_${uuidv4().replace(/-/g, '')}${uuidv4().replace(/-/g, '')}`;
+  const hours = params.expiresInHours ?? 24 * 30; // 30 days default
+  const result = await query<{ token: string; expires_at: string }>(
+    `
+      INSERT INTO portal_sessions (id, user_id, token, expires_at)
+      VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour' * $4)
+      RETURNING token, expires_at
+    `,
+    [id, params.userId, token, hours],
+  );
+
+  return {
+    token: result.rows[0].token,
+    expiresAt: result.rows[0].expires_at,
+  };
+}
+
+export async function findPortalUserByToken(token: string): Promise<PortalUserRecord | null> {
+  const result = await query<PortalUserRow>(
+    `
+      SELECT pu.*
+      FROM portal_sessions ps
+      JOIN portal_users pu ON pu.id = ps.user_id
+      WHERE ps.token = $1 AND ps.expires_at > NOW()
+      LIMIT 1
+    `,
+    [token],
+  );
+
+  if ((result.rowCount ?? 0) === 0) return null;
+  return mapPortalUser(result.rows[0]);
+}
+
+export async function deletePortalSession(token: string): Promise<void> {
+  await query(`DELETE FROM portal_sessions WHERE token = $1`, [token]);
+}
+
+export async function createPublicIdeaComment(params: {
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+  userEmail: string;
+  body: string;
+}): Promise<IdeaCommentRecord> {
+  // Check if comments are locked
+  const ideaResult = await query<{ comments_locked: boolean }>(
+    `SELECT comments_locked FROM ideas WHERE id = $1 AND workspace_id = $2`,
+    [params.ideaId, params.workspaceId],
+  );
+
+  if ((ideaResult.rowCount ?? 0) === 0) {
+    throw new Error('idea_not_found');
+  }
+
+  if (ideaResult.rows[0].comments_locked) {
+    throw new Error('idea_comments_locked');
+  }
+
+  // Ensure user exists in the users table (needed for FK)
+  await ensureUser({
+    userId: params.userId,
+    email: params.userEmail,
+    displayName: params.userEmail.split('@')[0],
+  });
+
+  const id = uuidv4();
+  const result = await query<IdeaCommentRow>(
+    `
+      INSERT INTO idea_comments (id, workspace_id, idea_id, user_id, body)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING
+        id, workspace_id, idea_id, user_id,
+        (SELECT email FROM users WHERE id = $4) AS user_email,
+        body, active, is_official, is_team_member, created_at, updated_at
+    `,
+    [id, params.workspaceId, params.ideaId, params.userId, params.body],
+  );
+
+  return mapIdeaComment(result.rows[0]);
+}
+
+/* ── Idea Subscriptions ── */
+
+export async function subscribeToIdea(params: {
+  ideaId: string;
+  userId: string;
+  notifyOn?: string[];
+}): Promise<{ ideaId: string; userId: string; notifyOn: string[] }> {
+  const notifyOn = params.notifyOn ?? ['status_change', 'official_response', 'new_comment'];
+  const result = await query<{ idea_id: string; user_id: string; notify_on: string[] }>(
+    `
+      INSERT INTO idea_subscriptions (idea_id, user_id, notify_on)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (idea_id, user_id) DO UPDATE SET notify_on = $3
+      RETURNING idea_id, user_id, notify_on
+    `,
+    [params.ideaId, params.userId, notifyOn],
+  );
+  const row = result.rows[0];
+  return { ideaId: row.idea_id, userId: row.user_id, notifyOn: row.notify_on };
+}
+
+export async function unsubscribeFromIdea(params: {
+  ideaId: string;
+  userId: string;
+}): Promise<void> {
+  await query(`DELETE FROM idea_subscriptions WHERE idea_id = $1 AND user_id = $2`, [
+    params.ideaId,
+    params.userId,
+  ]);
+}
+
+export async function getIdeaSubscription(params: {
+  ideaId: string;
+  userId: string;
+}): Promise<boolean> {
+  const result = await query<{ idea_id: string }>(
+    `SELECT idea_id FROM idea_subscriptions WHERE idea_id = $1 AND user_id = $2 LIMIT 1`,
+    [params.ideaId, params.userId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function listUserSubscriptions(params: {
+  userId: string;
+  limit?: number;
+  offset?: number;
+}): Promise<string[]> {
+  const limit = Math.max(1, Math.min(params.limit ?? 100, 200));
+  const offset = Math.max(0, params.offset ?? 0);
+  const result = await query<{ idea_id: string }>(
+    `SELECT idea_id FROM idea_subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+    [params.userId, limit, offset],
+  );
+  return result.rows.map((r) => r.idea_id);
+}
+
+/* ── Idea Favorites ── */
+
+export async function favoriteIdea(params: {
+  ideaId: string;
+  userId: string;
+}): Promise<{ ideaId: string; userId: string }> {
+  await query(
+    `INSERT INTO idea_favorites (idea_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [params.ideaId, params.userId],
+  );
+  return { ideaId: params.ideaId, userId: params.userId };
+}
+
+export async function unfavoriteIdea(params: {
+  ideaId: string;
+  userId: string;
+}): Promise<void> {
+  await query(`DELETE FROM idea_favorites WHERE idea_id = $1 AND user_id = $2`, [
+    params.ideaId,
+    params.userId,
+  ]);
+}
+
+export async function getIdeaFavorite(params: {
+  ideaId: string;
+  userId: string;
+}): Promise<boolean> {
+  const result = await query<{ idea_id: string }>(
+    `SELECT idea_id FROM idea_favorites WHERE idea_id = $1 AND user_id = $2 LIMIT 1`,
+    [params.ideaId, params.userId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function listUserFavorites(params: {
+  userId: string;
+  limit?: number;
+  offset?: number;
+}): Promise<string[]> {
+  const limit = Math.max(1, Math.min(params.limit ?? 100, 200));
+  const offset = Math.max(0, params.offset ?? 0);
+  const result = await query<{ idea_id: string }>(
+    `SELECT idea_id FROM idea_favorites WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+    [params.userId, limit, offset],
+  );
+  return result.rows.map((r) => r.idea_id);
+}
+
+/* ── User Profile & Activity ── */
+
+export async function updatePortalUserProfile(params: {
+  userId: string;
+  displayName?: string;
+  avatarUrl?: string;
+}): Promise<PortalUserRecord | null> {
+  const result = await query<PortalUserRow>(
+    `
+      UPDATE portal_users
+      SET
+        display_name = COALESCE($2, display_name),
+        avatar_url = COALESCE($3, avatar_url),
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [params.userId, params.displayName ?? null, params.avatarUrl ?? null],
+  );
+
+  if ((result.rowCount ?? 0) === 0) return null;
+  return mapPortalUser(result.rows[0]);
+}
+
+export async function listUserIdeas(params: {
+  userId: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ id: string; title: string; status: string; voteCount: number; createdAt: string }[]> {
+  const limit = Math.max(1, Math.min(params.limit ?? 50, 200));
+  const offset = Math.max(0, params.offset ?? 0);
+  const result = await query<{
+    id: string;
+    title: string;
+    status: string;
+    vote_count: string | number;
+    created_at: string;
+  }>(
+    `
+      SELECT i.id, i.title, i.status,
+        COALESCE((SELECT COUNT(*) FROM idea_votes iv WHERE iv.idea_id = i.id), 0)::int AS vote_count,
+        i.created_at
+      FROM ideas i
+      WHERE i.created_by = $1 AND i.active = TRUE
+      ORDER BY i.created_at DESC
+      LIMIT $2 OFFSET $3
+    `,
+    [params.userId, limit, offset],
+  );
+  return result.rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    voteCount: Number(r.vote_count),
+    createdAt: r.created_at,
+  }));
+}
+
+export async function listUserVotedIdeas(params: {
+  userId: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ id: string; title: string; status: string; voteCount: number; createdAt: string }[]> {
+  const limit = Math.max(1, Math.min(params.limit ?? 50, 200));
+  const offset = Math.max(0, params.offset ?? 0);
+  const result = await query<{
+    id: string;
+    title: string;
+    status: string;
+    vote_count: string | number;
+    created_at: string;
+  }>(
+    `
+      SELECT i.id, i.title, i.status,
+        COALESCE((SELECT COUNT(*) FROM idea_votes iv WHERE iv.idea_id = i.id), 0)::int AS vote_count,
+        i.created_at
+      FROM ideas i
+      JOIN idea_votes v ON v.idea_id = i.id AND v.user_id = $1
+      WHERE i.active = TRUE
+      ORDER BY v.created_at DESC
+      LIMIT $2 OFFSET $3
+    `,
+    [params.userId, limit, offset],
+  );
+  return result.rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    voteCount: Number(r.vote_count),
+    createdAt: r.created_at,
+  }));
+}
+
+/* ── Changelog Entries ── */
+
+export interface ChangelogEntryRecord {
+  id: string;
+  workspaceId: string;
+  boardId: string | null;
+  title: string;
+  body: string;
+  entryType: 'feature' | 'improvement' | 'bugfix' | 'announcement';
+  relatedIdeaIds: string[];
+  publishedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+interface ChangelogEntryRow {
+  id: string;
+  workspace_id: string;
+  board_id: string | null;
+  title: string;
+  body: string;
+  entry_type: 'feature' | 'improvement' | 'bugfix' | 'announcement';
+  related_idea_ids: string[];
+  published_at: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+function mapChangelogEntry(row: ChangelogEntryRow): ChangelogEntryRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    boardId: row.board_id,
+    title: row.title,
+    body: row.body,
+    entryType: row.entry_type,
+    relatedIdeaIds: row.related_idea_ids ?? [],
+    publishedAt: row.published_at,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+export async function createChangelogEntry(params: {
+  workspaceId: string;
+  boardId?: string;
+  title: string;
+  body: string;
+  entryType: 'feature' | 'improvement' | 'bugfix' | 'announcement';
+  relatedIdeaIds?: string[];
+  publishedAt?: string;
+  createdBy?: string;
+}): Promise<ChangelogEntryRecord> {
+  const id = uuidv4();
+  const result = await query<ChangelogEntryRow>(
+    `
+      INSERT INTO changelog_entries (id, workspace_id, board_id, title, body, entry_type, related_idea_ids, published_at, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `,
+    [
+      id,
+      params.workspaceId,
+      params.boardId ?? null,
+      params.title,
+      params.body,
+      params.entryType,
+      params.relatedIdeaIds ?? [],
+      params.publishedAt ?? new Date().toISOString(),
+      params.createdBy ?? null,
+    ],
+  );
+  return mapChangelogEntry(result.rows[0]);
+}
+
+export async function listChangelogEntries(params: {
+  workspaceId: string;
+  boardId?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ChangelogEntryRecord[]> {
+  const limit = Math.max(1, Math.min(params.limit ?? 50, 200));
+  const offset = Math.max(0, params.offset ?? 0);
+  const result = await query<ChangelogEntryRow>(
+    `
+      SELECT * FROM changelog_entries
+      WHERE workspace_id = $1
+        AND ($2::text IS NULL OR board_id = $2)
+        AND published_at IS NOT NULL
+      ORDER BY published_at DESC
+      LIMIT $3 OFFSET $4
+    `,
+    [params.workspaceId, params.boardId ?? null, limit, offset],
+  );
+  return result.rows.map(mapChangelogEntry);
+}
+
+/* ── Threaded Comments ── */
+
+export interface ThreadedCommentRecord {
+  id: string;
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+  userEmail: string;
+  body: string;
+  active: boolean;
+  isOfficial: boolean;
+  isTeamMember: boolean;
+  parentCommentId: string | null;
+  upvoteCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ThreadedCommentRow {
+  id: string;
+  workspace_id: string;
+  idea_id: string;
+  user_id: string;
+  user_email: string;
+  body: string;
+  active: boolean;
+  is_official: boolean;
+  is_team_member: boolean;
+  parent_comment_id: string | null;
+  upvote_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapThreadedComment(row: ThreadedCommentRow): ThreadedCommentRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    ideaId: row.idea_id,
+    userId: row.user_id,
+    userEmail: row.user_email,
+    body: row.body,
+    active: row.active,
+    isOfficial: row.is_official,
+    isTeamMember: row.is_team_member,
+    parentCommentId: row.parent_comment_id,
+    upvoteCount: Number(row.upvote_count),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function listThreadedComments(params: {
+  workspaceId: string;
+  ideaId: string;
+}): Promise<ThreadedCommentRecord[]> {
+  const result = await query<ThreadedCommentRow>(
+    `
+      SELECT
+        c.id, c.workspace_id, c.idea_id, c.user_id,
+        u.email AS user_email,
+        c.body, c.active, c.is_official, c.is_team_member,
+        c.parent_comment_id, c.upvote_count,
+        c.created_at, c.updated_at
+      FROM idea_comments c
+      JOIN users u ON u.id = c.user_id
+      WHERE c.workspace_id = $1 AND c.idea_id = $2 AND c.active = TRUE
+      ORDER BY c.created_at ASC
+    `,
+    [params.workspaceId, params.ideaId],
+  );
+  return result.rows.map(mapThreadedComment);
+}
+
+export async function createThreadedComment(params: {
+  workspaceId: string;
+  ideaId: string;
+  userId: string;
+  userEmail: string;
+  body: string;
+  parentCommentId?: string;
+}): Promise<ThreadedCommentRecord> {
+  // Check if comments are locked
+  const ideaResult = await query<{ comments_locked: boolean }>(
+    `SELECT comments_locked FROM ideas WHERE id = $1 AND workspace_id = $2`,
+    [params.ideaId, params.workspaceId],
+  );
+
+  if ((ideaResult.rowCount ?? 0) === 0) {
+    throw new Error('idea_not_found');
+  }
+
+  if (ideaResult.rows[0].comments_locked) {
+    throw new Error('idea_comments_locked');
+  }
+
+  await ensureUser({
+    userId: params.userId,
+    email: params.userEmail,
+    displayName: params.userEmail.split('@')[0],
+  });
+
+  const id = uuidv4();
+  const result = await query<ThreadedCommentRow>(
+    `
+      INSERT INTO idea_comments (id, workspace_id, idea_id, user_id, body, parent_comment_id)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING
+        id, workspace_id, idea_id, user_id,
+        (SELECT email FROM users WHERE id = $4) AS user_email,
+        body, active, is_official, is_team_member, parent_comment_id, upvote_count,
+        created_at, updated_at
+    `,
+    [id, params.workspaceId, params.ideaId, params.userId, params.body, params.parentCommentId ?? null],
+  );
+
+  return mapThreadedComment(result.rows[0]);
+}
+
+/* ── Comment Upvotes ── */
+
+export async function upvoteComment(params: {
+  commentId: string;
+  userId: string;
+}): Promise<{ commentId: string; upvoteCount: number }> {
+  return withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO comment_upvotes (comment_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [params.commentId, params.userId],
+    );
+    const result = await client.query<{ upvote_count: number }>(
+      `
+        UPDATE idea_comments
+        SET upvote_count = (SELECT COUNT(*) FROM comment_upvotes WHERE comment_id = $1)
+        WHERE id = $1
+        RETURNING upvote_count
+      `,
+      [params.commentId],
+    );
+    return {
+      commentId: params.commentId,
+      upvoteCount: Number(result.rows[0]?.upvote_count ?? 0),
+    };
+  });
+}
+
+export async function removeCommentUpvote(params: {
+  commentId: string;
+  userId: string;
+}): Promise<{ commentId: string; upvoteCount: number }> {
+  return withTransaction(async (client) => {
+    await client.query(
+      `DELETE FROM comment_upvotes WHERE comment_id = $1 AND user_id = $2`,
+      [params.commentId, params.userId],
+    );
+    const result = await client.query<{ upvote_count: number }>(
+      `
+        UPDATE idea_comments
+        SET upvote_count = (SELECT COUNT(*) FROM comment_upvotes WHERE comment_id = $1)
+        WHERE id = $1
+        RETURNING upvote_count
+      `,
+      [params.commentId],
+    );
+    return {
+      commentId: params.commentId,
+      upvoteCount: Number(result.rows[0]?.upvote_count ?? 0),
+    };
+  });
+}
+
+/* ── Password Reset ── */
+
+export async function createPasswordResetToken(params: {
+  userId: string;
+  expiresInMinutes?: number;
+}): Promise<{ token: string; expiresAt: string }> {
+  const id = uuidv4();
+  const token = `prt_${uuidv4().replace(/-/g, '')}`;
+  const minutes = params.expiresInMinutes ?? 60;
+  const result = await query<{ token: string; expires_at: string }>(
+    `
+      INSERT INTO password_reset_tokens (id, user_id, token, expires_at)
+      VALUES ($1, $2, $3, NOW() + INTERVAL '1 minute' * $4)
+      RETURNING token, expires_at
+    `,
+    [id, params.userId, token, minutes],
+  );
+  return {
+    token: result.rows[0].token,
+    expiresAt: result.rows[0].expires_at,
+  };
+}
+
+export async function findPasswordResetToken(token: string): Promise<{
+  userId: string;
+  expiresAt: string;
+  used: boolean;
+} | null> {
+  const result = await query<{ user_id: string; expires_at: string; used: boolean }>(
+    `SELECT user_id, expires_at, used FROM password_reset_tokens WHERE token = $1 LIMIT 1`,
+    [token],
+  );
+  if ((result.rowCount ?? 0) === 0) return null;
+  return {
+    userId: result.rows[0].user_id,
+    expiresAt: result.rows[0].expires_at,
+    used: result.rows[0].used,
+  };
+}
+
+export async function markResetTokenUsed(token: string): Promise<void> {
+  await query(`UPDATE password_reset_tokens SET used = true WHERE token = $1`, [token]);
+}
+
+export async function updatePortalUserPassword(params: {
+  userId: string;
+  passwordHash: string;
+}): Promise<void> {
+  await query(
+    `UPDATE portal_users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+    [params.passwordHash, params.userId],
+  );
+}
+
+/* ── Board Settings Extended (branding) ── */
+
+export interface BoardSettingsExtendedRecord extends BoardSettingsRecord {
+  customCss: string | null;
+  faviconUrl: string | null;
+  headerBgColor: string | null;
+  fontFamily: string | null;
+  hidePoweredBy: boolean;
+}
+
+export async function getBoardSettingsExtended(boardId: string): Promise<BoardSettingsExtendedRecord> {
+  const result = await query<BoardSettingsRow & {
+    custom_css: string | null;
+    favicon_url: string | null;
+    header_bg_color: string | null;
+    font_family: string | null;
+    hide_powered_by: boolean;
+  }>(
+    `SELECT * FROM board_settings WHERE board_id = $1 LIMIT 1`,
+    [boardId],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    return {
+      ...defaultBoardSettings,
+      boardId,
+      customCss: null,
+      faviconUrl: null,
+      headerBgColor: null,
+      fontFamily: null,
+      hidePoweredBy: false,
+    };
+  }
+
+  const row = result.rows[0];
+  return {
+    ...mapBoardSettings(row),
+    customCss: row.custom_css ?? null,
+    faviconUrl: row.favicon_url ?? null,
+    headerBgColor: row.header_bg_color ?? null,
+    fontFamily: row.font_family ?? null,
+    hidePoweredBy: row.hide_powered_by ?? false,
+  };
 }

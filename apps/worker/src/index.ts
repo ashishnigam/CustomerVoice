@@ -1,5 +1,8 @@
+import { loadLocalEnv } from './load-env.js';
 import nodemailer from 'nodemailer';
 import { Pool, type PoolClient } from 'pg';
+
+loadLocalEnv();
 
 interface NotificationJob {
   id: string;

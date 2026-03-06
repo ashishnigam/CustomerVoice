@@ -117,6 +117,12 @@ type PortalAppProps = {
   onNavigate: (path: string) => void;
 };
 
+type ApiHealthState = {
+  status: 'idle' | 'checking' | 'ok' | 'error';
+  message: string;
+  checkedAt: string | null;
+};
+
 const defaultApiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1';
 const defaultWorkspaceId = '22222222-2222-2222-2222-222222222222';
 const defaultUserId = '33333333-3333-3333-3333-333333333333';
@@ -223,6 +229,22 @@ function buildBoardPath(slug: string): string {
   return `/app/boards/${slug}`;
 }
 
+function buildHealthUrl(apiBase: string): string | null {
+  try {
+    const parsed = new URL(apiBase, window.location.origin);
+    return new URL('/health', parsed.origin).toString();
+  } catch {
+    return null;
+  }
+}
+
+function formatRoleLabel(role: Role): string {
+  return role
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   const [apiBase, setApiBase] = useState(defaultApiBase);
 
@@ -243,7 +265,8 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   const [boardsError, setBoardsError] = useState<string | null>(null);
 
   const [categories, setCategories] = useState<IdeaCategory[]>([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_categoriesLoading, setCategoriesLoading] = useState(false);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
   const [ideas, setIdeas] = useState<Idea[]>([]);
@@ -308,10 +331,16 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   const [outreachSubject, setOutreachSubject] = useState('');
   const [outreachMessage, setOutreachMessage] = useState('');
   const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const [apiHealth, setApiHealth] = useState<ApiHealthState>({
+    status: 'idle',
+    message: 'API connection has not been checked yet.',
+    checkedAt: null,
+  });
 
   const baseUrl = useMemo(() => apiBase.replace(/\/+$/, ''), [apiBase]);
   const headers = useMemo(() => (session ? requestHeaders(session) : null), [session]);
   const routeBoardSlug = useMemo(() => getBoardSlugFromPath(path), [path]);
+  const healthUrl = useMemo(() => buildHealthUrl(apiBase), [apiBase]);
 
   const selectedBoard = useMemo(
     () => boards.find((board) => board.id === selectedBoardId) ?? null,
@@ -341,6 +370,29 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   const boardVoteCount = useMemo(
     () => ideas.reduce((total, idea) => total + idea.voteCount, 0),
     [ideas],
+  );
+  const completedIdeaCount = useMemo(
+    () => ideas.filter((idea) => idea.status === 'completed').length,
+    [ideas],
+  );
+  const moderationIssueCount = useMemo(
+    () =>
+      moderationIdeas.filter(
+        (idea) => idea.moderationState !== 'normal' || idea.commentsLocked,
+      ).length,
+    [moderationIdeas],
+  );
+  const analyticsAudienceCount = useMemo(
+    () => analyticsItems.reduce((total, item) => total + item.contactEmails.length, 0),
+    [analyticsItems],
+  );
+  const highestRiceIdea = useMemo(
+    () =>
+      analyticsItems.reduce<AnalyticsItem | null>(
+        (best, item) => (best === null || item.riceScore > best.riceScore ? item : best),
+        null,
+      ),
+    [analyticsItems],
   );
 
   const canManageStatus = session ? rolesThatCanManageStatus.has(session.role) : false;
@@ -421,6 +473,42 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
     [baseUrl, headers, handleUnauthorized],
   );
 
+  const checkApiHealth = useCallback(async () => {
+    if (!healthUrl) {
+      setApiHealth({
+        status: 'error',
+        message: 'API Base URL is not a valid URL.',
+        checkedAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    setApiHealth({
+      status: 'checking',
+      message: `Checking ${healthUrl}`,
+      checkedAt: null,
+    });
+
+    try {
+      const response = await fetch(healthUrl);
+      if (!response.ok) {
+        throw new Error(`Health check failed (${response.status})`);
+      }
+
+      setApiHealth({
+        status: 'ok',
+        message: 'API is reachable and returned a healthy response.',
+        checkedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      setApiHealth({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Unable to reach API health endpoint.',
+        checkedAt: new Date().toISOString(),
+      });
+    }
+  }, [healthUrl]);
+
   const loadBoards = useCallback(async () => {
     if (!session) return;
 
@@ -437,8 +525,8 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
       } else {
         const routeBoard = routeBoardSlug
           ? data.items.find(
-              (item) => item.slug === routeBoardSlug || getShareableBoardSlug(item.slug) === routeBoardSlug,
-            ) ?? null
+            (item) => item.slug === routeBoardSlug || getShareableBoardSlug(item.slug) === routeBoardSlug,
+          ) ?? null
           : null;
 
         if (routeBoard) {
@@ -589,6 +677,10 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   }, [session, loadBoards, loadCategories]);
 
   useEffect(() => {
+    void checkApiHealth();
+  }, [checkApiHealth]);
+
+  useEffect(() => {
     if (routeBoardSlug) {
       setTab('portal');
     }
@@ -703,7 +795,8 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
     setAuthNotice('Signed out.');
   }, [clearWorkspaceView]);
 
-  const onWorkspaceSwitch = useCallback(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _onWorkspaceSwitch = useCallback(
     (nextWorkspaceId: string) => {
       if (!session || nextWorkspaceId === session.workspaceId) return;
 
@@ -934,10 +1027,10 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
           current.map((idea) =>
             idea.id === updated.id
               ? {
-                  ...idea,
-                  status: updated.status,
-                  moderationState: updated.moderationState,
-                }
+                ...idea,
+                status: updated.status,
+                moderationState: updated.moderationState,
+              }
               : idea,
           ),
         );
@@ -1116,172 +1209,306 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
     }
   }, [analyticsSegmentFilter, analyticsStatusFilter, apiRequest, selectedBoardId, session]);
 
+
+  /* ── group ideas by status for Kanban columns ── */
+  const kanbanColumns: { status: IdeaStatus; label: string; color: string }[] = [
+    { status: 'new', label: 'New', color: '#6366f1' },
+    { status: 'under_review', label: 'Under Review', color: '#f59e0b' },
+    { status: 'accepted', label: 'Accepted', color: '#10b981' },
+    { status: 'planned', label: 'Planned', color: '#2a78b7' },
+    { status: 'in_progress', label: 'In Progress', color: '#3b82f6' },
+    { status: 'completed', label: 'Completed', color: '#22c55e' },
+    { status: 'declined', label: 'Declined', color: '#ef4444' },
+  ];
+
+  const ideasByStatus = useMemo(() => {
+    const map = new Map<IdeaStatus, Idea[]>();
+    for (const col of kanbanColumns) {
+      map.set(col.status, []);
+    }
+    for (const idea of ideas) {
+      const bucket = map.get(idea.status);
+      if (bucket) bucket.push(idea);
+    }
+    return map;
+  }, [ideas]);
+
+  /* ── public portal status filter tabs ── */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _publicStatusTabs: { value: 'all' | IdeaStatus; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'new', label: 'New' },
+    { value: 'planned', label: 'Planned' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'completed', label: 'Completed' },
+  ];
+
+  /* ── Render: detail slide-over panel ── */
+  function renderDetailSlideover(): JSX.Element | null {
+    if (!selectedIdea) return null;
+    return (
+      <>
+        <div className="detail-overlay" onClick={() => setSelectedIdeaId(null)} />
+        <aside className="detail-slideover">
+          <header className="detail-slideover-header">
+            <h2>Idea Detail</h2>
+            <button className="detail-close-btn" onClick={() => setSelectedIdeaId(null)}>✕</button>
+          </header>
+          <div className="detail-slideover-body">
+            <h1 className="detail-title">{selectedIdea.title}</h1>
+            <p className="detail-description">{selectedIdea.description}</p>
+
+            <div className="detail-meta-grid">
+              <div className="detail-meta-item">
+                <span>Status</span>
+                <strong><span className={statusClassName[selectedIdea.status]}>{statusLabel[selectedIdea.status]}</span></strong>
+              </div>
+              <div className="detail-meta-item">
+                <span>Votes</span>
+                <strong>{selectedIdea.voteCount}</strong>
+              </div>
+              <div className="detail-meta-item">
+                <span>Comments</span>
+                <strong>{selectedIdea.commentCount}</strong>
+              </div>
+              <div className="detail-meta-item">
+                <span>Updated</span>
+                <strong>{formatDate(selectedIdea.updatedAt)}</strong>
+              </div>
+            </div>
+
+            {selectedIdea.categoryNames.length > 0 ? (
+              <div className="pill-row">
+                {selectedIdea.categoryNames.map((cat) => (
+                  <span className="category-pill" key={`d-${cat}`}>{cat}</span>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="detail-actions">
+              <button
+                className={`detail-vote-btn ${selectedIdea.viewerHasVoted ? 'voted' : ''}`}
+                onClick={() => void onToggleVote()}
+              >
+                {selectedIdea.viewerHasVoted ? '✓ Voted' : '▲ Upvote'}
+              </button>
+              {canManageStatus ? (
+                <select
+                  value={selectedIdea.status}
+                  disabled={statusBusy}
+                  onChange={(event) => void onUpdateStatus(event.target.value as IdeaStatus)}
+                >
+                  {ideaStatusValues.map((s) => (
+                    <option key={s} value={s}>{statusLabel[s]}</option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+
+            <h3 className="detail-section-title">Comments ({comments.length})</h3>
+            {selectedIdea.commentsLocked ? (
+              <p className="locked-note">Comments are locked by moderation.</p>
+            ) : null}
+            {commentsLoading ? <p className="empty">Loading comments…</p> : null}
+            {comments.map((c) => (
+              <div className="detail-comment" key={c.id}>
+                <p>{c.body}</p>
+                <small>{c.userEmail} · {formatDate(c.createdAt)}</small>
+              </div>
+            ))}
+            {comments.length === 0 && !commentsLoading ? (
+              <p className="empty">No comments yet.</p>
+            ) : null}
+
+            <form className="detail-comment-form" onSubmit={onCreateComment}>
+              <textarea
+                rows={3}
+                value={commentBody}
+                onChange={(e) => setCommentBody(e.target.value)}
+                placeholder="Add a comment…"
+                disabled={selectedIdea.commentsLocked}
+              />
+              <button type="submit" disabled={commentBusy || selectedIdea.commentsLocked} className="btn-sm">
+                {commentBusy ? 'Posting…' : 'Post Comment'}
+              </button>
+            </form>
+          </div>
+        </aside>
+      </>
+    );
+  }
+
+  /* ════════════════════════════════════════
+     AUTH SHELL (not signed in)
+     ════════════════════════════════════════ */
   if (!session) {
     return (
       <main className="page">
-        <section className="panel auth-panel">
-          <p className="eyebrow">CustomerVoice v1</p>
-          <h1>Workspace Portal Sign In</h1>
-          <p className="subtitle">
-            Supports mock auth and Supabase JWT mode. Unauthorized API responses redirect back here.
-          </p>
+        <section className="auth-shell">
+          <article className="auth-story-card">
+            <p className="eyebrow">CustomerVoice Operator Console</p>
+            <h1>Make the public request board feel calm, clear, and worth returning to.</h1>
+            <p>The customer surface should stay simple. Operators handle routing, moderation, and prioritization from this workspace shell.</p>
 
-          <form className="form-grid" onSubmit={onSignIn}>
-            <label>
-              API Base URL
-              <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} />
-            </label>
-            <label>
-              Workspace ID
-              <select
-                value={workspaceIdInput}
-                onChange={(event) => setWorkspaceIdInput(event.target.value)}
-              >
-                {workspaceOptions.map((workspaceId) => (
-                  <option key={workspaceId} value={workspaceId}>
-                    {workspaceId}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              User ID
-              <input value={userIdInput} onChange={(event) => setUserIdInput(event.target.value)} />
-            </label>
-            <label>
-              User Email
-              <input
-                value={userEmailInput}
-                onChange={(event) => setUserEmailInput(event.target.value)}
-              />
-            </label>
-            <label>
-              Role
-              <select value={roleInput} onChange={(event) => setRoleInput(event.target.value as Role)}>
-                <option value="tenant_admin">tenant_admin</option>
-                <option value="workspace_admin">workspace_admin</option>
-                <option value="product_manager">product_manager</option>
-                <option value="engineering_manager">engineering_manager</option>
-                <option value="contributor">contributor</option>
-                <option value="viewer">viewer</option>
-              </select>
-            </label>
-            <label>
-              Access Token (optional)
-              <input
-                value={accessTokenInput}
-                onChange={(event) => setAccessTokenInput(event.target.value)}
-                placeholder="Required when AUTH_MODE=supabase"
-              />
-            </label>
-            <div className="button-row">
-              <button type="submit">Sign In</button>
+            <div className="auth-story-grid">
+              <section className="auth-story-section">
+                <p className="eyebrow">Recommended local mode</p>
+                <h2>Mock auth with seeded workspace data</h2>
+                <p>Use the default IDs below unless you are testing Supabase mode intentionally.</p>
+                <div className="pill-row" style={{ marginTop: '10px' }}>
+                  <span className="category-pill">Workspace {defaultWorkspaceId.slice(0, 8)}…</span>
+                  <span className="category-pill">Admin {defaultUserId.slice(0, 8)}…</span>
+                  <span className="category-pill">Role {formatRoleLabel(roleInput)}</span>
+                </div>
+              </section>
+              <section className="auth-story-section">
+                <p className="eyebrow">Connection status</p>
+                <div className={`health-pill health-${apiHealth.status}`}>
+                  <strong>{apiHealth.status === 'ok' ? 'API ready' : apiHealth.status === 'checking' ? 'Checking API' : apiHealth.status === 'error' ? 'API unreachable' : 'Not checked'}</strong>
+                  <span>{apiHealth.message}</span>
+                </div>
+                <div className="button-row" style={{ marginTop: '10px' }}>
+                  <button type="button" onClick={() => void checkApiHealth()} disabled={apiHealth.status === 'checking'} className="btn-sm">
+                    {apiHealth.status === 'checking' ? 'Checking…' : 'Check API'}
+                  </button>
+                </div>
+              </section>
             </div>
-          </form>
+          </article>
 
-          <form
-            className="inline-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const nextWorkspace = workspaceIdInput.trim();
-              if (nextWorkspace.length === 0) return;
-              setWorkspaceOptions((current) =>
-                current.includes(nextWorkspace) ? current : [...current, nextWorkspace],
-              );
-            }}
-          >
-            <label>
-              Add Workspace Profile
-              <input
-                placeholder="workspace-id"
-                value={workspaceIdInput}
-                onChange={(event) => setWorkspaceIdInput(event.target.value)}
-              />
-            </label>
-            <button type="submit">Save Workspace</button>
-          </form>
+          <section className="auth-panel">
+            <p className="eyebrow">Workspace access</p>
+            <h2>Sign in to the operator view</h2>
+            <p className="subtitle" style={{ marginBottom: '16px' }}>Supports mock auth and Supabase JWT mode.</p>
 
-          {authNotice ? <p className="notice error">{authNotice}</p> : null}
+            <form className="form-grid" onSubmit={onSignIn}>
+              <label>API Base URL<input value={apiBase} onChange={(e) => setApiBase(e.target.value)} /></label>
+              <label>Workspace ID
+                <select value={workspaceIdInput} onChange={(e) => setWorkspaceIdInput(e.target.value)}>
+                  {workspaceOptions.map((w) => <option key={w} value={w}>{w}</option>)}
+                </select>
+              </label>
+              <label>User ID<input value={userIdInput} onChange={(e) => setUserIdInput(e.target.value)} /></label>
+              <label>User Email<input value={userEmailInput} onChange={(e) => setUserEmailInput(e.target.value)} /></label>
+              <label>Role
+                <select value={roleInput} onChange={(e) => setRoleInput(e.target.value as Role)}>
+                  <option value="tenant_admin">tenant_admin</option>
+                  <option value="workspace_admin">workspace_admin</option>
+                  <option value="product_manager">product_manager</option>
+                  <option value="engineering_manager">engineering_manager</option>
+                  <option value="contributor">contributor</option>
+                  <option value="viewer">viewer</option>
+                </select>
+              </label>
+              <label>Access Token (optional)<input value={accessTokenInput} onChange={(e) => setAccessTokenInput(e.target.value)} placeholder="Required when AUTH_MODE=supabase" /></label>
+              <div className="button-row"><button type="submit">Enter workspace</button></div>
+            </form>
+
+            <form className="inline-form" onSubmit={(e) => { e.preventDefault(); const n = workspaceIdInput.trim(); if (n.length === 0) return; setWorkspaceOptions((c) => c.includes(n) ? c : [...c, n]); }}>
+              <label>Save workspace profile<input placeholder="workspace-id" value={workspaceIdInput} onChange={(e) => setWorkspaceIdInput(e.target.value)} /></label>
+              <button type="submit" className="btn-sm">Save</button>
+            </form>
+
+            {authNotice ? <p className="notice error">{authNotice}</p> : null}
+          </section>
         </section>
       </main>
     );
   }
 
+  /* ════════════════════════════════════════
+     OPERATOR DASHBOARD (signed in)
+     ════════════════════════════════════════ */
   return (
-    <main className="page">
-      <section className="panel">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">CustomerVoice Workspace</p>
-            <h1>Configure boards, then share a customer-facing request portal.</h1>
-            <p className="subtitle">
-              Boards and categories are setup layers. The real surface customers should experience is the shareable
-              board view.
-            </p>
+    <div className="dashboard-layout">
+      {/* ── Top Toolbar ── */}
+      <header className="dash-toolbar">
+        <div className="dash-toolbar-brand">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 12l2 2 4-4" /></svg>
+          CustomerVoice
+        </div>
+        <div className="dash-toolbar-search">
+          <input
+            value={ideaSearch}
+            onChange={(e) => setIdeaSearch(e.target.value)}
+            placeholder="Search ideas…"
+          />
+        </div>
+        <div className="dash-toolbar-actions">
+          <div className="user-badge">
+            {session.userEmail}
+            <span className="role-tag">{formatRoleLabel(session.role)}</span>
           </div>
-          <div className="topbar-actions">
-            {selectedBoard ? (
-              <button
-                className="secondary"
-                onClick={() => onNavigate(buildBoardPath(getShareableBoardSlug(selectedBoard.slug)))}
-              >
-                Open Board Route
-              </button>
-            ) : null}
-            <button onClick={() => void Promise.all([loadBoards(), loadCategories()])} disabled={boardsLoading}>
-              Refresh
+          <button className="btn-sm secondary" onClick={() => void Promise.all([loadBoards(), loadCategories()])} disabled={boardsLoading}>↻ Refresh</button>
+          <button className="btn-sm secondary" onClick={onSignOut}>Sign out</button>
+        </div>
+      </header>
+
+      {/* ── Sidebar ── */}
+      <nav className="dash-sidebar">
+        <div className="dash-sidebar-section">
+          <div className="dash-sidebar-section-title">Boards</div>
+          {boards.length === 0 ? <p className="empty" style={{ padding: '0 12px', fontSize: '0.82rem' }}>No boards yet</p> : null}
+          {boards.map((board) => (
+            <button
+              key={board.id}
+              className={`dash-sidebar-item ${selectedBoardId === board.id ? 'active' : ''}`}
+              onClick={() => onSelectBoard(board.id)}
+            >
+              <span className="sidebar-icon">📋</span>
+              {board.name}
+              <span className="sidebar-board-vis">{board.visibility === 'public' ? '🌐' : '🔒'}</span>
             </button>
-            <button className="secondary" onClick={onSignOut}>
-              Sign Out
+          ))}
+        </div>
+
+        <div className="dash-sidebar-section">
+          <div className="dash-sidebar-section-title">Workspace</div>
+          <button className={`dash-sidebar-item ${tab === 'portal' ? 'active' : ''}`} onClick={() => setTab('portal')}>
+            <span className="sidebar-icon">📊</span>Kanban Board
+          </button>
+          {isModerationEnabled ? (
+            <button className={`dash-sidebar-item ${tab === 'moderation' ? 'active' : ''}`} onClick={() => setTab('moderation')}>
+              <span className="sidebar-icon">🛡️</span>Moderation
+              {moderationIssueCount > 0 ? <span className="sidebar-badge">{moderationIssueCount}</span> : null}
             </button>
+          ) : null}
+          {isAnalyticsEnabled ? (
+            <button className={`dash-sidebar-item ${tab === 'analytics' ? 'active' : ''}`} onClick={() => setTab('analytics')}>
+              <span className="sidebar-icon">📈</span>Insights
+            </button>
+          ) : null}
+        </div>
+
+        {selectedBoard ? (
+          <div className="dash-sidebar-section" style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--cv-border)' }}>
+            <div className="dash-sidebar-section-title">Board Link</div>
+            <button className="dash-sidebar-item" onClick={() => void onCopyBoardLink()} style={{ fontSize: '0.78rem' }}>
+              <span className="sidebar-icon">🔗</span>Copy public link
+            </button>
+            {shareNotice ? <p className="inline-note" style={{ padding: '0 12px' }}>{shareNotice}</p> : null}
           </div>
-        </header>
+        ) : null}
 
-        <section className="session-strip">
-          <label>
-            API Base URL
-            <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} />
-          </label>
-          <label>
-            Workspace
-            <select value={session.workspaceId} onChange={(event) => onWorkspaceSwitch(event.target.value)}>
-              {workspaceOptions.map((workspaceId) => (
-                <option key={workspaceId} value={workspaceId}>
-                  {workspaceId}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            User
-            <input value={`${session.userEmail} (${session.role})`} readOnly />
-          </label>
-          <label>
-            Current Board URL
-            <input value={customerBoardUrl ?? 'Create or select a board to generate a route'} readOnly />
-          </label>
-        </section>
+        {/* Board create in sidebar */}
+        <div className="dash-sidebar-section">
+          <form className="board-create-form" onSubmit={onCreateBoard}>
+            <h3>New Board</h3>
+            <label>Name<input value={boardName} onChange={(e) => setBoardName(e.target.value)} placeholder="e.g. Feature Requests" /></label>
+            <label>Visibility
+              <select value={boardVisibility} onChange={(e) => setBoardVisibility(e.target.value as 'public' | 'private')}>
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
+            </label>
+            <button type="submit" disabled={boardCreateBusy} className="btn-sm">{boardCreateBusy ? 'Creating…' : 'Create'}</button>
+          </form>
+        </div>
+      </nav>
 
-        <nav className="tabbar">
-          <button className={tab === 'portal' ? 'tab-active' : ''} onClick={() => setTab('portal')}>
-            Portal
-          </button>
-          <button
-            className={tab === 'moderation' ? 'tab-active' : ''}
-            onClick={() => setTab('moderation')}
-            disabled={!isModerationEnabled}
-          >
-            Moderation
-          </button>
-          <button
-            className={tab === 'analytics' ? 'tab-active' : ''}
-            onClick={() => setTab('analytics')}
-            disabled={!isAnalyticsEnabled}
-          >
-            Analytics
-          </button>
-        </nav>
-
+      {/* ── Main Content ── */}
+      <main className="dash-main">
+        {/* Error notices */}
         {boardsError ? <p className="notice error">{boardsError}</p> : null}
         {categoriesError ? <p className="notice error">{categoriesError}</p> : null}
         {ideasError ? <p className="notice error">{ideasError}</p> : null}
@@ -1290,720 +1517,291 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
         {analyticsError ? <p className="notice error">{analyticsError}</p> : null}
 
         {tab === 'portal' ? (
-          <section className="board-shell">
-            <aside className="board-sidebar">
-              <article className="card board-directory-card">
-                <p className="eyebrow">Board Directory</p>
-                <h2>Choose the board customers should land on.</h2>
-                <p className="subtitle">
-                  Every board becomes a shareable route. Select the board you want to configure or preview.
-                </p>
-                <ul className="list selectable board-directory-list">
-                  {boards.length === 0 ? <li className="empty">No boards yet.</li> : null}
-                  {boards.map((board) => (
-                    <li key={board.id}>
-                      <button
-                        className={selectedBoardId === board.id ? 'selected' : ''}
-                        onClick={() => onSelectBoard(board.id)}
-                      >
-                        <strong>{board.name}</strong>
-                        <span>{board.visibility === 'public' ? 'Public board' : 'Private board'}</span>
-                        <small>{buildBoardPath(getShareableBoardSlug(board.slug))}</small>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </article>
+          <>
+            {/* Summary stats */}
+            <div className="summary-stats-row">
+              <div className="summary-stat"><span>Open Requests</span><strong>{openIdeaCount}</strong></div>
+              <div className="summary-stat"><span>Total Votes</span><strong>{boardVoteCount}</strong></div>
+              <div className="summary-stat"><span>Completed</span><strong>{completedIdeaCount}</strong></div>
+              <div className="summary-stat"><span>Categories</span><strong>{categories.length}</strong></div>
+            </div>
 
-              <article className="card board-config-card">
-                <p className="eyebrow">Board Setup</p>
-                <h2>{selectedBoard ? `${selectedBoard.name} configuration` : 'Create your first board'}</h2>
-                <p className="subtitle">
-                  Create the board once, define the categories, then use the board route as the customer-facing request
-                  portal.
-                </p>
+            {/* Kanban header */}
+            <div className="kanban-header">
+              <h2>{selectedBoard ? selectedBoard.name : 'Select a board'}</h2>
+              <div className="kanban-header-right">
+                <select value={ideaStatusFilter} onChange={(e) => setIdeaStatusFilter(e.target.value as 'all' | IdeaStatus)}>
+                  <option value="all">All statuses</option>
+                  {kanbanColumns.map((c) => <option key={c.status} value={c.status}>{c.label}</option>)}
+                </select>
+                <select value={ideaCategoryFilter} onChange={(e) => setIdeaCategoryFilter(e.target.value)}>
+                  <option value="all">All categories</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={ideaSort} onChange={(e) => setIdeaSort(e.target.value as IdeaSortMode)}>
+                  {sortModes.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
+                </select>
+              </div>
+            </div>
 
-                {selectedBoard ? (
-                  <div className="board-share-panel">
-                    <label>
-                      Canonical Board Route
-                      <input value={customerBoardUrl ?? ''} readOnly />
-                    </label>
-                    <div className="button-row">
-                      <button type="button" onClick={() => void onCopyBoardLink()}>
-                        Copy Board Link
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() =>
-                          onNavigate(buildBoardPath(getShareableBoardSlug(selectedBoard.slug)))
-                        }
-                      >
-                        Open Board Preview
-                      </button>
-                    </div>
-                    {shareNotice ? <p className="inline-note">{shareNotice}</p> : null}
-                    <div className="board-setup-stats">
-                      <div>
-                        <strong>{selectedBoard.visibility}</strong>
-                        <span>visibility</span>
-                      </div>
-                      <div>
-                        <strong>{categories.length}</strong>
-                        <span>categories</span>
-                      </div>
-                      <div>
-                        <strong>{ideas.length}</strong>
-                        <span>visible ideas</span>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+            {ideasLoading ? <p className="empty">Loading ideas…</p> : null}
 
-                <form className="stack" onSubmit={onCreateBoard}>
-                  <h3>Create Board</h3>
-                  <label>
-                    Name
-                    <input value={boardName} onChange={(event) => setBoardName(event.target.value)} />
-                  </label>
-                  <label>
-                    Description
-                    <textarea
-                      rows={3}
-                      value={boardDescription}
-                      onChange={(event) => setBoardDescription(event.target.value)}
-                      placeholder="Explain what customers should submit and what this board covers."
-                    />
-                  </label>
-                  <label>
-                    Visibility
-                    <select
-                      value={boardVisibility}
-                      onChange={(event) => setBoardVisibility(event.target.value as 'public' | 'private')}
-                    >
-                      <option value="public">public</option>
-                      <option value="private">private</option>
-                    </select>
-                  </label>
-                  <button type="submit" disabled={boardCreateBusy}>
-                    {boardCreateBusy ? 'Creating...' : 'Create Board'}
-                  </button>
-                </form>
-              </article>
-
-              <article className="card category-config-card">
-                <p className="eyebrow">Category Setup</p>
-                <h2>Structure the request intake.</h2>
-                {categoriesLoading ? <p>Loading categories...</p> : null}
-                <ul className="list compact-list category-list">
-                  {categories.length === 0 ? <li className="empty">No categories yet.</li> : null}
-                  {categories.map((category) => (
-                    <li key={category.id}>
-                      <span className="category-dot" style={{ background: category.colorHex ?? '#4E84C4' }} />
-                      <span>{category.name}</span>
-                    </li>
-                  ))}
-                </ul>
-                <form className="stack" onSubmit={onCreateCategory}>
-                  <h3>Create Category</h3>
-                  <label>
-                    Name
-                    <input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} />
-                  </label>
-                  <label>
-                    Color Hex
-                    <input
-                      value={categoryColorHex}
-                      onChange={(event) => setCategoryColorHex(event.target.value)}
-                      placeholder="#4E84C4"
-                    />
-                  </label>
-                  <button type="submit" disabled={categoryBusy}>
-                    {categoryBusy ? 'Creating...' : 'Create Category'}
-                  </button>
-                </form>
-              </article>
-            </aside>
-
-            <section className="board-main">
-              {selectedBoard ? (
-                <>
-                  <article className="board-hero-card">
-                    <div>
-                      <p className="eyebrow">Customer Board Preview</p>
-                      <h2>{selectedBoard.name}</h2>
-                      <p className="subtitle">
-                        {selectedBoard.description && selectedBoard.description.trim().length > 0
-                          ? selectedBoard.description
-                          : 'Use this board to collect feature requests, let customers vote, and keep roadmap decisions visible.'}
-                      </p>
-                    </div>
-                    <div className="board-hero-actions">
-                      <div className="board-hero-route">
-                        <span>Shareable route</span>
-                        <strong>{buildBoardPath(getShareableBoardSlug(selectedBoard.slug))}</strong>
+            {!selectedBoard ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                <h2 style={{ marginBottom: '8px' }}>Create a board to get started</h2>
+                <p className="subtitle">Use the sidebar to create your first feedback board.</p>
+              </div>
+            ) : (
+              <div className="kanban-board">
+                {kanbanColumns.map((col) => {
+                  const columnIdeas = ideasByStatus.get(col.status) ?? [];
+                  return (
+                    <div className="kanban-column" key={col.status}>
+                      <div className="kanban-column-header">
+                        <span className="kanban-column-dot" style={{ background: col.color }} />
+                        <span className="kanban-column-title">{col.label}</span>
+                        <span className="kanban-column-count">{columnIdeas.length}</span>
                       </div>
-                      <div className="button-row">
-                        <button type="button" onClick={() => void onCopyBoardLink()}>
-                          Copy Link
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() =>
-                            onNavigate(buildBoardPath(getShareableBoardSlug(selectedBoard.slug)))
-                          }
-                        >
-                          Stay On Board Route
-                        </button>
-                      </div>
-                    </div>
-                    <div className="board-hero-metrics">
-                      <div>
-                        <strong>{ideas.length}</strong>
-                        <span>visible requests</span>
-                      </div>
-                      <div>
-                        <strong>{openIdeaCount}</strong>
-                        <span>open items</span>
-                      </div>
-                      <div>
-                        <strong>{boardVoteCount}</strong>
-                        <span>total votes</span>
-                      </div>
-                      <div>
-                        <strong>{categories.length}</strong>
-                        <span>category filters</span>
-                      </div>
-                    </div>
-                  </article>
-
-                  <div className="board-preview-grid">
-                    <article className="card board-ideas-card">
-                      <div className="section-heading-row">
-                        <div>
-                          <p className="eyebrow">Customer Experience</p>
-                          <h2>Feature requests, voting, and discovery</h2>
-                        </div>
-                        <small className="route-chip">
-                          {buildBoardPath(getShareableBoardSlug(selectedBoard.slug))}
-                        </small>
-                      </div>
-
-                      <div className="filter-grid">
-                        <label>
-                          Search
-                          <input
-                            value={ideaSearch}
-                            onChange={(event) => setIdeaSearch(event.target.value)}
-                            placeholder="Search ideas"
-                          />
-                        </label>
-                        <label>
-                          Status
-                          <select
-                            value={ideaStatusFilter}
-                            onChange={(event) => setIdeaStatusFilter(event.target.value as 'all' | IdeaStatus)}
+                      <div className="kanban-column-body">
+                        {columnIdeas.map((idea) => (
+                          <button
+                            key={idea.id}
+                            className={`kanban-card ${selectedIdeaId === idea.id ? 'active' : ''}`}
+                            onClick={() => setSelectedIdeaId(idea.id)}
                           >
-                            <option value="all">all</option>
-                            {ideaStatusValues.map((status) => (
-                              <option key={status} value={status}>
-                                {statusLabel[status]}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Category
-                          <select
-                            value={ideaCategoryFilter}
-                            onChange={(event) => setIdeaCategoryFilter(event.target.value as 'all' | string)}
-                          >
-                            <option value="all">all</option>
-                            {categories.map((category) => (
-                              <option key={category.id} value={category.id}>
-                                {category.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Sort
-                          <select value={ideaSort} onChange={(event) => setIdeaSort(event.target.value as IdeaSortMode)}>
-                            {sortModes.map((mode) => (
-                              <option key={mode} value={mode}>
-                                {mode}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      {ideasLoading ? <p>Loading ideas...</p> : null}
-                      <ul className="list selectable ideas-list board-idea-list">
-                        {selectedBoard && ideas.length === 0 && !ideasLoading ? (
-                          <li className="empty">No ideas found for current filters.</li>
-                        ) : null}
-                        {ideas.map((idea) => (
-                          <li key={idea.id}>
-                            <button
-                              className={selectedIdeaId === idea.id ? 'selected' : ''}
-                              onClick={() => setSelectedIdeaId(idea.id)}
-                            >
-                              <div className="idea-card-topline">
-                                <strong>{idea.title}</strong>
-                                <span className="vote-pill">{idea.voteCount} votes</span>
-                              </div>
-                              <p className="idea-excerpt">{idea.description}</p>
-                              <div className="status-row">
-                                <span className={statusClassName[idea.status]}>{statusLabel[idea.status]}</span>
-                                <span className={moderationClassName[idea.moderationState]}>
-                                  {moderationLabel[idea.moderationState]}
-                                </span>
-                              </div>
-                              {idea.categoryNames.length > 0 ? (
-                                <div className="pill-row">
-                                  {idea.categoryNames.map((categoryName) => (
-                                    <span className="category-pill" key={`${idea.id}-${categoryName}`}>
-                                      {categoryName}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : null}
-                              <small>{idea.commentCount} comments · updated {formatDate(idea.updatedAt)}</small>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-
-                      <form className="stack board-submit-form" onSubmit={onCreateIdea}>
-                        <h3>Submit a feature request</h3>
-                        <label>
-                          Title
-                          <input value={ideaTitle} onChange={(event) => setIdeaTitle(event.target.value)} />
-                        </label>
-                        <label>
-                          Description
-                          <textarea
-                            rows={4}
-                            value={ideaDescription}
-                            onChange={(event) => setIdeaDescription(event.target.value)}
-                            placeholder="Describe the user problem, desired outcome, and any business impact."
-                          />
-                        </label>
-                        {categories.length > 0 ? (
-                          <fieldset className="category-select-grid">
-                            <legend>Categories</legend>
-                            {categories.map((category) => (
-                              <label key={category.id} className="checkbox-row">
-                                <input
-                                  type="checkbox"
-                                  checked={ideaCategoryDraft.includes(category.id)}
-                                  onChange={() => onToggleIdeaCategoryDraft(category.id)}
-                                />
-                                <span>{category.name}</span>
-                              </label>
-                            ))}
-                          </fieldset>
-                        ) : null}
-                        <button type="submit" disabled={ideaCreateBusy}>
-                          {ideaCreateBusy ? 'Submitting...' : 'Submit Idea'}
-                        </button>
-                      </form>
-                    </article>
-
-                    <article className="card detail-card board-detail-card">
-                      <p className="eyebrow">Idea Detail</p>
-                      {!selectedIdea ? <p className="empty">Select an idea to view details.</p> : null}
-                      {selectedIdea ? (
-                        <>
-                          <h2>{selectedIdea.title}</h2>
-                          <p>{selectedIdea.description}</p>
-                          <p className="meta-row">
-                            <span className={statusClassName[selectedIdea.status]}>
-                              {statusLabel[selectedIdea.status]}
-                            </span>
-                            <span className={moderationClassName[selectedIdea.moderationState]}>
-                              {moderationLabel[selectedIdea.moderationState]}
-                            </span>
-                            <span>{selectedIdea.voteCount} votes</span>
-                            <span>{selectedIdea.commentCount} comments</span>
-                            <span>Updated {formatDate(selectedIdea.updatedAt)}</span>
-                          </p>
-
-                          {selectedIdea.categoryNames.length > 0 ? (
-                            <div className="pill-row">
-                              {selectedIdea.categoryNames.map((categoryName) => (
-                                <span className="category-pill" key={`detail-${categoryName}`}>
-                                  {categoryName}
-                                </span>
-                              ))}
+                            <span className="kanban-card-title">{idea.title}</span>
+                            <div className="kanban-card-meta">
+                              <span className="kanban-card-vote">▲ {idea.voteCount}</span>
+                              <span className="kanban-card-comments">💬 {idea.commentCount}</span>
                             </div>
-                          ) : null}
-
-                          <div className="button-row">
-                            <button onClick={() => void onToggleVote()}>
-                              {selectedIdea.viewerHasVoted ? 'Remove Vote' : 'Upvote Idea'}
-                            </button>
-                            {canManageStatus ? (
-                              <select
-                                value={selectedIdea.status}
-                                disabled={statusBusy}
-                                onChange={(event) => void onUpdateStatus(event.target.value as IdeaStatus)}
-                              >
-                                {ideaStatusValues.map((status) => (
-                                  <option key={status} value={status}>
-                                    {statusLabel[status]}
-                                  </option>
+                            {idea.categoryNames.length > 0 ? (
+                              <div className="pill-row">
+                                {idea.categoryNames.map((cat) => (
+                                  <span className="category-pill" key={`k-${idea.id}-${cat}`}>{cat}</span>
                                 ))}
-                              </select>
+                              </div>
                             ) : null}
-                          </div>
-
-                          <h3>Comments</h3>
-                          {selectedIdea.commentsLocked ? (
-                            <p className="locked-note">Comments are locked by moderation.</p>
-                          ) : null}
-                          {commentsLoading ? <p>Loading comments...</p> : null}
-                          <ul className="list comments">
-                            {comments.length === 0 && !commentsLoading ? (
-                              <li className="empty">No comments yet.</li>
-                            ) : null}
-                            {comments.map((comment) => (
-                              <li key={comment.id}>
-                                <p>{comment.body}</p>
-                                <small>
-                                  {comment.userEmail} · {formatDate(comment.createdAt)}
-                                </small>
-                              </li>
-                            ))}
-                          </ul>
-
-                          <form className="stack" onSubmit={onCreateComment}>
-                            <label>
-                              Add Comment
-                              <textarea
-                                rows={3}
-                                value={commentBody}
-                                onChange={(event) => setCommentBody(event.target.value)}
-                                disabled={selectedIdea.commentsLocked}
-                              />
-                            </label>
-                            <button type="submit" disabled={commentBusy || selectedIdea.commentsLocked}>
-                              {commentBusy ? 'Posting...' : 'Post Comment'}
-                            </button>
-                          </form>
-                        </>
-                      ) : null}
-                    </article>
-                  </div>
-                </>
-              ) : (
-                <article className="card board-empty-state">
-                  <p className="eyebrow">Start Here</p>
-                  <h2>Create a board first.</h2>
-                  <p className="subtitle">
-                    Once a board exists, CustomerVoice will generate a canonical board route that you can bookmark,
-                    share, and use as the main customer-facing request experience.
-                  </p>
-                </article>
-              )}
-            </section>
-          </section>
-        ) : null}
-
-        {tab === 'moderation' ? (
-          <section className="layout-grid layout-moderation">
-            <article className="card">
-              <h2>Moderation Queue</h2>
-              <div className="filter-grid">
-                <label>
-                  Search
-                  <input
-                    value={moderationSearch}
-                    onChange={(event) => setModerationSearch(event.target.value)}
-                    placeholder="Search moderation queue"
-                  />
-                </label>
-                <label>
-                  State
-                  <select
-                    value={moderationStateFilter}
-                    onChange={(event) =>
-                      setModerationStateFilter(event.target.value as 'all' | IdeaModerationState)
-                    }
-                  >
-                    <option value="all">all</option>
-                    {moderationStateValues.map((state) => (
-                      <option key={state} value={state}>
-                        {moderationLabel[state]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="button-row align-end">
-                  <button onClick={() => void loadModerationIdeas()} disabled={moderationLoading}>
-                    {moderationLoading ? 'Loading...' : 'Refresh'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="button-row moderation-actions">
-                <button onClick={() => void runModerationBulk('mark_spam')} disabled={moderationBusy || moderationSelection.length === 0}>
-                  Mark Spam
-                </button>
-                <button onClick={() => void runModerationBulk('restore')} disabled={moderationBusy || moderationSelection.length === 0}>
-                  Restore
-                </button>
-                <button onClick={() => void runModerationBulk('lock_comments')} disabled={moderationBusy || moderationSelection.length === 0}>
-                  Lock Comments
-                </button>
-                <button onClick={() => void runModerationBulk('unlock_comments')} disabled={moderationBusy || moderationSelection.length === 0}>
-                  Unlock Comments
-                </button>
-              </div>
-
-              <ul className="list moderation-list">
-                {moderationIdeas.length === 0 && !moderationLoading ? <li className="empty">No moderation items.</li> : null}
-                {moderationIdeas.map((idea) => (
-                  <li key={idea.id}>
-                    <label className="moderation-item">
-                      <input
-                        type="checkbox"
-                        checked={moderationSelection.includes(idea.id)}
-                        onChange={(event) => {
-                          if (event.target.checked) {
-                            setModerationSelection((current) => [...current, idea.id]);
-                          } else {
-                            setModerationSelection((current) => current.filter((id) => id !== idea.id));
-                          }
-                        }}
-                      />
-                      <div>
-                        <strong>{idea.title}</strong>
-                        <p className="meta-row">
-                          <span className={statusClassName[idea.status]}>{statusLabel[idea.status]}</span>
-                          <span className={moderationClassName[idea.moderationState]}>
-                            {moderationLabel[idea.moderationState]}
-                          </span>
-                          <span>{idea.voteCount} votes</span>
-                          <span>{idea.commentCount} comments</span>
-                        </p>
+                          </button>
+                        ))}
+                        {columnIdeas.length === 0 ? <p className="empty" style={{ padding: '12px', textAlign: 'center' }}>No ideas</p> : null}
                       </div>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            </article>
-
-            <article className="card">
-              <h2>Merge Duplicate Ideas</h2>
-              <p className="subtitle">Select source idea to merge into target idea.</p>
-              <label>
-                Source Idea
-                <select value={mergeSourceIdeaId} onChange={(event) => setMergeSourceIdeaId(event.target.value)}>
-                  <option value="">select source</option>
-                  {moderationIdeas.map((idea) => (
-                    <option key={idea.id} value={idea.id}>
-                      {idea.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Target Idea
-                <select value={mergeTargetIdeaId} onChange={(event) => setMergeTargetIdeaId(event.target.value)}>
-                  <option value="">select target</option>
-                  {moderationIdeas.map((idea) => (
-                    <option key={idea.id} value={idea.id}>
-                      {idea.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="button-row">
-                <button onClick={() => void onMergeIdeas()} disabled={moderationBusy}>
-                  {moderationBusy ? 'Merging...' : 'Merge Ideas'}
-                </button>
+                    </div>
+                  );
+                })}
               </div>
-            </article>
-          </section>
+            )}
+
+            {/* Submit idea form */}
+            {selectedBoard ? (
+              <div className="public-submit-section" style={{ marginTop: '20px' }}>
+                <h3>Submit a feature request</h3>
+                <form className="public-form" onSubmit={onCreateIdea}>
+                  <label>Title<input value={ideaTitle} onChange={(e) => setIdeaTitle(e.target.value)} placeholder="Brief summary of the feature" /></label>
+                  <label>Description<textarea rows={3} value={ideaDescription} onChange={(e) => setIdeaDescription(e.target.value)} placeholder="Describe the user problem and desired outcome" /></label>
+                  {categories.length > 0 ? (
+                    <fieldset className="category-select-grid">
+                      <legend>Categories</legend>
+                      {categories.map((c) => (
+                        <label key={c.id} className="checkbox-row">
+                          <input type="checkbox" checked={ideaCategoryDraft.includes(c.id)} onChange={() => onToggleIdeaCategoryDraft(c.id)} />
+                          <span>{c.name}</span>
+                        </label>
+                      ))}
+                    </fieldset>
+                  ) : null}
+                  <button type="submit" disabled={ideaCreateBusy}>{ideaCreateBusy ? 'Submitting…' : 'Submit Idea'}</button>
+                </form>
+              </div>
+            ) : null}
+
+            {/* Category management */}
+            {selectedBoard ? (
+              <div className="board-create-form" style={{ marginTop: '16px' }}>
+                <h3>Manage Categories</h3>
+                <div className="pill-row" style={{ marginBottom: '8px' }}>
+                  {categories.map((c) => (
+                    <span className="category-pill" key={c.id} style={{ borderLeftColor: c.colorHex ?? '#4E84C4', borderLeftWidth: '3px', borderLeftStyle: 'solid' }}>
+                      {c.name}
+                    </span>
+                  ))}
+                  {categories.length === 0 ? <span className="empty">No categories yet</span> : null}
+                </div>
+                <form className="public-form" onSubmit={onCreateCategory} style={{ gridTemplateColumns: '1fr auto auto', alignItems: 'end' }}>
+                  <label>Name<input value={categoryName} onChange={(e) => setCategoryName(e.target.value)} placeholder="Category name" /></label>
+                  <label>Color<input value={categoryColorHex} onChange={(e) => setCategoryColorHex(e.target.value)} type="color" style={{ width: '48px', padding: '4px' }} /></label>
+                  <button type="submit" disabled={categoryBusy} className="btn-sm">{categoryBusy ? '…' : 'Add'}</button>
+                </form>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
-        {tab === 'analytics' ? (
-          <section className="layout-grid layout-analytics">
-            <article className="card">
-              <h2>Analytics Dashboard</h2>
-              <div className="filter-grid">
-                <label>
-                  Status
-                  <select
-                    value={analyticsStatusFilter}
-                    onChange={(event) => setAnalyticsStatusFilter(event.target.value as 'all' | IdeaStatus)}
-                  >
-                    <option value="all">all</option>
-                    {ideaStatusValues.map((status) => (
-                      <option key={status} value={status}>
-                        {statusLabel[status]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Segment
-                  <input
-                    value={analyticsSegmentFilter}
-                    onChange={(event) => setAnalyticsSegmentFilter(event.target.value)}
-                    placeholder="segment filter"
-                  />
-                </label>
-                <div className="button-row align-end">
-                  <button onClick={() => void loadAnalytics()} disabled={analyticsLoading}>
-                    Refresh
-                  </button>
-                  <button onClick={() => void onExportAnalyticsCsv()} disabled={analyticsLoading}>
-                    Export CSV
-                  </button>
+        {
+          tab === 'moderation' ? (
+            <div className="mod-panel">
+              <div className="mod-panel-header">
+                <h2>🛡️ Moderation Queue</h2>
+                <div className="button-row">
+                  <button className="btn-sm" onClick={() => void loadModerationIdeas()} disabled={moderationLoading}>{moderationLoading ? 'Loading…' : 'Refresh'}</button>
                 </div>
               </div>
 
-              <ul className="list analytics-list">
-                {analyticsItems.length === 0 && !analyticsLoading ? (
-                  <li className="empty">No analytics rows available.</li>
-                ) : null}
-                {analyticsItems.map((item) => (
-                  <li key={item.ideaId}>
-                    <button
-                      className={selectedAnalyticsIdeaId === item.ideaId ? 'selected' : ''}
-                      onClick={() => setSelectedAnalyticsIdeaId(item.ideaId)}
-                    >
-                      <strong>{item.title}</strong>
-                      <small>
-                        RICE {item.riceScore.toFixed(2)} · Revenue {toCurrency(item.revenuePotentialUsd)} · Contacts{' '}
-                        {item.contactEmails.length}
-                      </small>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </article>
+              <div className="summary-stats-row">
+                <div className="summary-stat"><span>Selected</span><strong>{moderationSelection.length}</strong></div>
+                <div className="summary-stat"><span>Flagged</span><strong>{moderationIssueCount}</strong></div>
+                <div className="summary-stat"><span>In Queue</span><strong>{moderationIdeas.length}</strong></div>
+              </div>
 
-            <article className="card detail-card">
-              <h2>RICE and Revenue Input</h2>
-              {!selectedAnalyticsIdea ? <p className="empty">Select an idea from analytics list.</p> : null}
-              {selectedAnalyticsIdea ? (
-                <>
-                  <h3>{selectedAnalyticsIdea.title}</h3>
-                  <p className="meta-row">
-                    <span className={statusClassName[selectedAnalyticsIdea.status]}>
-                      {statusLabel[selectedAnalyticsIdea.status]}
-                    </span>
-                    <span>Votes: {selectedAnalyticsIdea.voteCount}</span>
-                    <span>Comments: {selectedAnalyticsIdea.commentCount}</span>
-                  </p>
+              <div className="filter-grid">
+                <label>Search<input value={moderationSearch} onChange={(e) => setModerationSearch(e.target.value)} placeholder="Search queue" /></label>
+                <label>State
+                  <select value={moderationStateFilter} onChange={(e) => setModerationStateFilter(e.target.value as 'all' | IdeaModerationState)}>
+                    <option value="all">All</option>
+                    {moderationStateValues.map((s) => <option key={s} value={s}>{moderationLabel[s]}</option>)}
+                  </select>
+                </label>
+              </div>
 
-                  <form className="stack" onSubmit={onSaveAnalyticsInput}>
-                    <div className="grid two-col">
-                      <label>
-                        Reach
-                        <input
-                          type="number"
-                          value={reachInput}
-                          onChange={(event) => setReachInput(Number(event.target.value))}
-                        />
-                      </label>
-                      <label>
-                        Impact
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={impactInput}
-                          onChange={(event) => setImpactInput(Number(event.target.value))}
-                        />
-                      </label>
-                      <label>
-                        Confidence (0-1)
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={confidenceInput}
-                          onChange={(event) => setConfidenceInput(Number(event.target.value))}
-                        />
-                      </label>
-                      <label>
-                        Effort
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={effortInput}
-                          onChange={(event) => setEffortInput(Number(event.target.value))}
-                        />
-                      </label>
-                      <label>
-                        Revenue Potential USD
-                        <input
-                          type="number"
-                          value={revenueInput}
-                          onChange={(event) => setRevenueInput(Number(event.target.value))}
-                        />
-                      </label>
-                      <label>
-                        Customer Count
-                        <input
-                          type="number"
-                          value={customerCountInput}
-                          onChange={(event) => setCustomerCountInput(Number(event.target.value))}
-                        />
-                      </label>
+              <div className="mod-actions-bar">
+                <button className="btn-sm" onClick={() => void runModerationBulk('mark_spam')} disabled={moderationBusy || moderationSelection.length === 0}>🚫 Mark Spam</button>
+                <button className="btn-sm secondary" onClick={() => void runModerationBulk('restore')} disabled={moderationBusy || moderationSelection.length === 0}>✓ Restore</button>
+                <button className="btn-sm secondary" onClick={() => void runModerationBulk('lock_comments')} disabled={moderationBusy || moderationSelection.length === 0}>🔒 Lock Comments</button>
+                <button className="btn-sm secondary" onClick={() => void runModerationBulk('unlock_comments')} disabled={moderationBusy || moderationSelection.length === 0}>🔓 Unlock</button>
+              </div>
+
+              <div className="list">
+                {moderationIdeas.length === 0 && !moderationLoading ? <p className="empty">No moderation items.</p> : null}
+                {moderationIdeas.map((idea) => (
+                  <div className="mod-idea-row" key={idea.id}>
+                    <input
+                      type="checkbox"
+                      checked={moderationSelection.includes(idea.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) setModerationSelection((c) => [...c, idea.id]);
+                        else setModerationSelection((c) => c.filter((id) => id !== idea.id));
+                      }}
+                    />
+                    <div>
+                      <strong>{idea.title}</strong>
+                      <div className="meta-row">
+                        <span className={statusClassName[idea.status]}>{statusLabel[idea.status]}</span>
+                        <span className={moderationClassName[idea.moderationState]}>{moderationLabel[idea.moderationState]}</span>
+                        <span>{idea.voteCount} votes</span>
+                        <span>{idea.commentCount} comments</span>
+                      </div>
                     </div>
-                    <label>
-                      Customer Segment
-                      <input value={segmentInput} onChange={(event) => setSegmentInput(event.target.value)} />
-                    </label>
-                    <button type="submit" disabled={analyticsInputBusy}>
-                      {analyticsInputBusy ? 'Saving...' : 'Save Analytics Input'}
-                    </button>
-                  </form>
+                  </div>
+                ))}
+              </div>
 
-                  <h3>Outreach Trigger</h3>
-                  <p className="subtitle">Recipients are resolved from upvoters and commenters.</p>
-                  <form className="stack" onSubmit={onSendOutreach}>
-                    <label>
-                      Subject
-                      <input
-                        value={outreachSubject}
-                        onChange={(event) => setOutreachSubject(event.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Message
-                      <textarea
-                        rows={4}
-                        value={outreachMessage}
-                        onChange={(event) => setOutreachMessage(event.target.value)}
-                      />
-                    </label>
-                    <button type="submit" disabled={analyticsOutreachBusy}>
-                      {analyticsOutreachBusy ? 'Enqueuing...' : 'Send Outreach Job'}
-                    </button>
-                  </form>
+              <div className="mod-merge-section">
+                <h3>Merge Duplicate Ideas</h3>
+                <label>Source Idea
+                  <select value={mergeSourceIdeaId} onChange={(e) => setMergeSourceIdeaId(e.target.value)}>
+                    <option value="">Select source</option>
+                    {moderationIdeas.map((i) => <option key={i.id} value={i.id}>{i.title}</option>)}
+                  </select>
+                </label>
+                <label>Target Idea
+                  <select value={mergeTargetIdeaId} onChange={(e) => setMergeTargetIdeaId(e.target.value)}>
+                    <option value="">Select target</option>
+                    {moderationIdeas.map((i) => <option key={i.id} value={i.id}>{i.title}</option>)}
+                  </select>
+                </label>
+                <button onClick={() => void onMergeIdeas()} disabled={moderationBusy} className="btn-sm">
+                  {moderationBusy ? 'Merging…' : 'Merge Ideas'}
+                </button>
+              </div>
+            </div>
+          ) : null
+        }
 
-                  <h4>Contact Emails</h4>
-                  <ul className="list compact-list">
-                    {selectedAnalyticsIdea.contactEmails.length === 0 ? (
-                      <li className="empty">No audience contacts yet.</li>
-                    ) : null}
-                    {selectedAnalyticsIdea.contactEmails.map((email) => (
-                      <li key={email}>{email}</li>
+        {
+          tab === 'analytics' ? (
+            <div className="analytics-panel">
+              <div className="analytics-panel-header">
+                <h2>📈 Insights & Prioritization</h2>
+                <div className="button-row">
+                  <button className="btn-sm" onClick={() => void loadAnalytics()} disabled={analyticsLoading}>Refresh</button>
+                  <button className="btn-sm secondary" onClick={() => void onExportAnalyticsCsv()} disabled={analyticsLoading}>Export CSV</button>
+                </div>
+              </div>
+
+              <div className="summary-stats-row">
+                <div className="summary-stat"><span>Ideas Scored</span><strong>{analyticsItems.length}</strong></div>
+                <div className="summary-stat"><span>Audience</span><strong>{analyticsAudienceCount}</strong></div>
+                <div className="summary-stat"><span>Top RICE</span><strong>{highestRiceIdea ? highestRiceIdea.riceScore.toFixed(1) : '0.0'}</strong></div>
+              </div>
+
+              <div className="filter-grid">
+                <label>Status
+                  <select value={analyticsStatusFilter} onChange={(e) => setAnalyticsStatusFilter(e.target.value as 'all' | IdeaStatus)}>
+                    <option value="all">All statuses</option>
+                    {ideaStatusValues.map((s) => <option key={s} value={s}>{statusLabel[s]}</option>)}
+                  </select>
+                </label>
+                <label>Segment<input value={analyticsSegmentFilter} onChange={(e) => setAnalyticsSegmentFilter(e.target.value)} placeholder="Filter by segment" /></label>
+              </div>
+
+              <div className="analytics-grid">
+                <div className="analytics-list-card">
+                  <div className="acard-header"><strong>Ideas</strong></div>
+                  <div className="acard-body">
+                    {analyticsItems.length === 0 && !analyticsLoading ? <p className="empty">No analytics data</p> : null}
+                    {analyticsItems.map((item) => (
+                      <button key={item.ideaId} className={`analytics-idea-btn ${selectedAnalyticsIdeaId === item.ideaId ? 'active' : ''}`} onClick={() => setSelectedAnalyticsIdeaId(item.ideaId)}>
+                        <strong>{item.title}</strong>
+                        <small>RICE {item.riceScore.toFixed(2)} · {toCurrency(item.revenuePotentialUsd)} · {item.contactEmails.length} contacts</small>
+                      </button>
                     ))}
-                  </ul>
-                </>
-              ) : null}
-            </article>
-          </section>
-        ) : null}
-      </section>
-    </main>
+                  </div>
+                </div>
+
+                <div className="analytics-detail-card">
+                  {!selectedAnalyticsIdea ? <p className="empty">Select an idea from the list.</p> : (
+                    <>
+                      <h3>{selectedAnalyticsIdea.title}</h3>
+                      <div className="meta-row">
+                        <span className={statusClassName[selectedAnalyticsIdea.status]}>{statusLabel[selectedAnalyticsIdea.status]}</span>
+                        <span>Votes: {selectedAnalyticsIdea.voteCount}</span>
+                        <span>Comments: {selectedAnalyticsIdea.commentCount}</span>
+                      </div>
+
+                      <form className="stack" onSubmit={onSaveAnalyticsInput}>
+                        <div className="grid two-col">
+                          <label>Reach<input type="number" value={reachInput} onChange={(e) => setReachInput(Number(e.target.value))} /></label>
+                          <label>Impact<input type="number" step="0.1" value={impactInput} onChange={(e) => setImpactInput(Number(e.target.value))} /></label>
+                          <label>Confidence (0-1)<input type="number" step="0.01" value={confidenceInput} onChange={(e) => setConfidenceInput(Number(e.target.value))} /></label>
+                          <label>Effort<input type="number" step="0.1" value={effortInput} onChange={(e) => setEffortInput(Number(e.target.value))} /></label>
+                          <label>Revenue USD<input type="number" value={revenueInput} onChange={(e) => setRevenueInput(Number(e.target.value))} /></label>
+                          <label>Customer Count<input type="number" value={customerCountInput} onChange={(e) => setCustomerCountInput(Number(e.target.value))} /></label>
+                        </div>
+                        <label>Segment<input value={segmentInput} onChange={(e) => setSegmentInput(e.target.value)} /></label>
+                        <button type="submit" disabled={analyticsInputBusy} className="btn-sm">{analyticsInputBusy ? 'Saving…' : 'Save Analytics Input'}</button>
+                      </form>
+
+                      <h3 className="detail-section-title">Outreach</h3>
+                      <form className="stack" onSubmit={onSendOutreach}>
+                        <label>Subject<input value={outreachSubject} onChange={(e) => setOutreachSubject(e.target.value)} /></label>
+                        <label>Message<textarea rows={3} value={outreachMessage} onChange={(e) => setOutreachMessage(e.target.value)} /></label>
+                        <button type="submit" disabled={analyticsOutreachBusy} className="btn-sm">{analyticsOutreachBusy ? 'Sending…' : 'Send Outreach'}</button>
+                      </form>
+
+                      <h3 className="detail-section-title">Contact Emails</h3>
+                      <ul className="list compact-list">
+                        {selectedAnalyticsIdea.contactEmails.length === 0 ? <li className="empty">No contacts yet</li> : null}
+                        {selectedAnalyticsIdea.contactEmails.map((email) => <li key={email}>{email}</li>)}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null
+        }
+
+        {renderDetailSlideover()}
+      </main >
+    </div >
   );
 }

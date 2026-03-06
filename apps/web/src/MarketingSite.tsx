@@ -15,6 +15,7 @@ type PageMetadata = {
 };
 
 type FeatureCard = {
+  icon: string;
   eyebrow: string;
   title: string;
   body: string;
@@ -44,24 +45,28 @@ type BlogPost = {
 
 const featureCards: FeatureCard[] = [
   {
+    icon: '📋',
     eyebrow: 'Portal',
     title: 'Collect demand in one public feedback board',
     body:
       'Boards, ideas, votes, comments, visible statuses, and category filters are in place so customers can see what is being requested and what is shipping.',
   },
   {
+    icon: '🛡️',
     eyebrow: 'Moderation',
     title: 'Triage noisy requests without losing signal',
     body:
       'Product teams can mark spam, lock comment threads, merge duplicates, and run bulk moderation actions from the internal queue.',
   },
   {
+    icon: '📊',
     eyebrow: 'Decisioning',
     title: 'Rank work using RICE and revenue potential',
     body:
       'Internal analytics surfaces reach, impact, confidence, effort, revenue potential, and customer contact lists so PMs can make defendable calls.',
   },
   {
+    icon: '🔔',
     eyebrow: 'Close The Loop',
     title: 'Notify users when an idea is completed',
     body:
@@ -111,7 +116,7 @@ const pricingPlans: PricingPlan[] = [
       'Moderation queue and internal analytics cockpit',
       'Completion notification emails through the worker pipeline',
     ],
-    ctaLabel: 'Open The App',
+    ctaLabel: 'Start Free →',
     ctaPath: '/app',
   },
   {
@@ -366,9 +371,9 @@ export function getMarketingMetadata(path: string, origin: string): PageMetadata
 
   const pageMap: Record<string, Omit<PageMetadata, 'structuredData'>> = {
     '/': {
-      title: 'CustomerVoice | Feedback Portal And Product Decision Platform',
+      title: 'CustomerVoice | The Feedback Operations Platform For Product Teams',
       description:
-        'CustomerVoice helps product teams capture ideas, moderate signal, prioritize with RICE and revenue context, and close the loop with shipped notifications.',
+        'CustomerVoice helps product teams capture customer feedback, prioritize features with RICE and revenue context, moderate demand, and close the loop with shipped notifications.',
       ogType: 'website',
     },
     '/features': {
@@ -470,37 +475,49 @@ function activeNav(path: string): string {
   return path;
 }
 
+/* ============================================================
+   PAGE RENDERERS
+   ============================================================ */
+
 function renderHome(onNavigate: NavigateFn): JSX.Element {
   return (
     <>
+      {/* Hero */}
       <section className="hero-grid">
         <div className="hero-copy">
-          <p className="eyebrow marketing-eyebrow">Customer Feedback, Prioritization, And Product Delivery Visibility</p>
-          <h1 className="hero-title">Build the public board customers want, with the internal workflow product teams need.</h1>
+          <div className="hero-badge">
+            <span className="hero-badge-dot" />
+            Now in Beta — Free for early teams
+          </div>
+          <h1 className="hero-title">
+            Turn customer feedback into{' '}
+            <span className="gradient-text">product decisions</span>
+          </h1>
           <p className="hero-body">
-            CustomerVoice is a feedback operations platform for SaaS teams that want more than a voting board. Capture
-            demand publicly, moderate and prioritize it internally, then close the loop when work ships.
+            CustomerVoice is the feedback operations platform for SaaS teams that want more than
+            a voting board. Capture demand publicly, moderate and prioritize internally, then close
+            the loop when work ships.
           </p>
           <div className="hero-actions">
             <SiteLink className="hero-button primary" path="/app" onNavigate={onNavigate}>
-              Launch The App
+              Start Free →
             </SiteLink>
-            <SiteLink className="hero-button secondary" path="/docs" onNavigate={onNavigate}>
+            <SiteLink className="hero-button ghost" path="/docs" onNavigate={onNavigate}>
               Explore Docs
             </SiteLink>
           </div>
           <div className="hero-metrics">
             <div>
-              <strong>Public board</strong>
-              <span>Customers can see requests, vote, comment, and follow visible statuses.</span>
+              <strong>Public Board</strong>
+              <span>Customers vote, comment, and track visible statuses</span>
             </div>
             <div>
-              <strong>Internal cockpit</strong>
-              <span>Moderation, analytics, and outreach live behind the same product surface.</span>
+              <strong>Internal Cockpit</strong>
+              <span>Moderation, RICE scoring, analytics, and outreach</span>
             </div>
             <div>
-              <strong>Enterprise posture</strong>
-              <span>Cloud-neutral and compliance-ready without pretending enterprise features are already done.</span>
+              <strong>Enterprise-Ready</strong>
+              <span>Compliance-ready architecture with audit trail</span>
             </div>
           </div>
         </div>
@@ -509,20 +526,22 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </aside>
       </section>
 
+      {/* Why CustomerVoice */}
       <section className="marketing-section">
         <div className="section-heading-row">
           <div>
-            <p className="eyebrow marketing-eyebrow">Why CustomerVoice</p>
+            <p className="eyebrow">Why CustomerVoice</p>
             <h2>Most feedback tools stop at collection. Product teams do not.</h2>
           </div>
           <SiteLink className="inline-link" path="/features" onNavigate={onNavigate}>
-            View full feature breakdown
+            View all features →
           </SiteLink>
         </div>
         <div className="marketing-card-grid four-up">
           {featureCards.map((feature) => (
             <article className="marketing-card" key={feature.title}>
-              <p className="eyebrow marketing-eyebrow">{feature.eyebrow}</p>
+              <div className="card-icon">{feature.icon}</div>
+              <p className="eyebrow">{feature.eyebrow}</p>
               <h3>{feature.title}</h3>
               <p>{feature.body}</p>
             </article>
@@ -530,9 +549,10 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
+      {/* Workflow */}
       <section className="marketing-section split-visual-section">
         <div>
-          <p className="eyebrow marketing-eyebrow">Workflow</p>
+          <p className="eyebrow">Workflow</p>
           <h2>From demand intake to shipped update.</h2>
           <div className="workflow-grid">
             {workflowSteps.map((step) => (
@@ -549,9 +569,10 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
+      {/* Operating Thesis */}
       <section className="marketing-section proof-section">
         <div>
-          <p className="eyebrow marketing-eyebrow">Operating Thesis</p>
+          <p className="eyebrow">Operating Thesis</p>
           <h2>Designed for sister-company rollout first, then external B2B SaaS growth.</h2>
         </div>
         <div className="proof-list">
@@ -564,10 +585,11 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
+      {/* Use Cases */}
       <section className="marketing-section">
         <div className="section-heading-row">
           <div>
-            <p className="eyebrow marketing-eyebrow">Who This Is For</p>
+            <p className="eyebrow">Who This Is For</p>
             <h2>Built for teams that want product feedback to become an operating system.</h2>
           </div>
         </div>
@@ -581,9 +603,10 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
+      {/* Enterprise */}
       <section className="marketing-section split-visual-section">
         <div>
-          <p className="eyebrow marketing-eyebrow">Enterprise-Ready Direction</p>
+          <p className="eyebrow">Enterprise-Ready Direction</p>
           <h2>Simple product now, serious architecture underneath.</h2>
           <div className="marketing-card compact-callout">
             <ul className="marketing-list">
@@ -598,14 +621,15 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
+      {/* Launch Scope */}
       <section className="marketing-section">
         <div className="section-heading-row">
           <div>
-            <p className="eyebrow marketing-eyebrow">What Launch Actually Delivers</p>
+            <p className="eyebrow">What Launch Actually Delivers</p>
             <h2>Marketing promise and shipped scope stay aligned.</h2>
           </div>
           <SiteLink className="inline-link" path="/docs/integrations" onNavigate={onNavigate}>
-            Review implementation boundaries
+            Review implementation boundaries →
           </SiteLink>
         </div>
         <div className="marketing-card-grid three-up">
@@ -617,9 +641,10 @@ function renderHome(onNavigate: NavigateFn): JSX.Element {
         </div>
       </section>
 
+      {/* CTA */}
       <section className="marketing-section cta-strip">
         <div>
-          <p className="eyebrow marketing-eyebrow">Next Step</p>
+          <p className="eyebrow">Next Step</p>
           <h2>Use the website to evaluate the category. Use the app to run the workflow.</h2>
         </div>
         <div className="button-cluster">
@@ -639,7 +664,7 @@ function renderFeatures(onNavigate: NavigateFn): JSX.Element {
   return (
     <>
       <section className="page-intro">
-        <p className="eyebrow marketing-eyebrow">Features</p>
+        <p className="eyebrow">Features</p>
         <h1>Everything in V1 is organized around a simple principle: visible product decisions.</h1>
         <p>
           The public portal handles collection. The internal workspace handles moderation, prioritization, and customer
@@ -689,7 +714,7 @@ function renderFeatures(onNavigate: NavigateFn): JSX.Element {
 
       <section className="marketing-section split-callout">
         <div>
-          <p className="eyebrow marketing-eyebrow">Engineering Constraint</p>
+          <p className="eyebrow">Engineering Constraint</p>
           <h2>Scalable enough for launch, simple enough to run locally.</h2>
           <p>
             The stack is React on the web, Node in the API and worker layer, Postgres for persistence, and Docker
@@ -709,7 +734,7 @@ function renderPricing(onNavigate: NavigateFn): JSX.Element {
   return (
     <>
       <section className="page-intro">
-        <p className="eyebrow marketing-eyebrow">Pricing</p>
+        <p className="eyebrow">Pricing</p>
         <h1>Free beta first. Commercial packaging after real adoption appears.</h1>
         <p>
           The launch model is deliberate: keep the product free during beta until 50 external logos are active, then
@@ -739,7 +764,7 @@ function renderPricing(onNavigate: NavigateFn): JSX.Element {
 
       <section className="marketing-section split-callout">
         <div>
-          <p className="eyebrow marketing-eyebrow">Packaging Logic</p>
+          <p className="eyebrow">Packaging Logic</p>
           <h2>Enterprise requirements are acknowledged early, not faked early.</h2>
           <p>
             Private model routing, VPC posture, and regional expansion are part of the roadmap because enterprise buyers
@@ -759,7 +784,7 @@ function renderBlogIndex(onNavigate: NavigateFn): JSX.Element {
   return (
     <>
       <section className="page-intro">
-        <p className="eyebrow marketing-eyebrow">Blog</p>
+        <p className="eyebrow">Blog</p>
         <h1>Content designed to support SEO, funding narrative, and product education.</h1>
         <p>
           The blog should not be filler. It should explain the operating thesis, teach the market, and help founders,
@@ -769,13 +794,13 @@ function renderBlogIndex(onNavigate: NavigateFn): JSX.Element {
       <section className="marketing-card-grid three-up">
         {blogPosts.map((post) => (
           <article className="marketing-card blog-card" key={post.slug}>
-            <p className="eyebrow marketing-eyebrow">{post.category}</p>
+            <p className="eyebrow">{post.category}</p>
             <h2>{post.title}</h2>
             <p>{post.summary}</p>
             <div className="blog-meta-row">
               <span>{post.publishedAt}</span>
               <SiteLink className="inline-link" path={`/blog/${post.slug}`} onNavigate={onNavigate}>
-                Read article
+                Read article →
               </SiteLink>
             </div>
           </article>
@@ -795,9 +820,9 @@ function renderBlogPost(path: string, onNavigate: NavigateFn): JSX.Element {
   return (
     <article className="blog-article">
       <SiteLink className="inline-link" path="/blog" onNavigate={onNavigate}>
-        Back to blog
+        ← Back to blog
       </SiteLink>
-      <p className="eyebrow marketing-eyebrow">{post.category}</p>
+      <p className="eyebrow" style={{ marginTop: '20px' }}>{post.category}</p>
       <h1>{post.title}</h1>
       <p className="blog-lead">{post.summary}</p>
       <div className="blog-meta-row">
@@ -820,7 +845,7 @@ function renderDocsOverview(onNavigate: NavigateFn): JSX.Element {
   return (
     <>
       <section className="page-intro">
-        <p className="eyebrow marketing-eyebrow">Documentation</p>
+        <p className="eyebrow">Documentation</p>
         <h1>Developer docs focused on what exists now and what is intentionally planned later.</h1>
         <p>
           The fastest way to create confusion is to publish docs that promise features the platform does not yet have.
@@ -846,26 +871,26 @@ function renderDocsOverview(onNavigate: NavigateFn): JSX.Element {
         </article>
       </section>
 
-      <section className="marketing-card-grid two-up">
+      <section className="marketing-card-grid two-up" style={{ marginTop: '20px' }}>
         <article className="marketing-card docs-card">
           <h2>API guide</h2>
           <p>Boards, ideas, votes, comments, moderation, analytics, membership, and audit endpoints.</p>
           <SiteLink className="inline-link" path="/docs/api" onNavigate={onNavigate}>
-            Open API guide
+            Open API guide →
           </SiteLink>
         </article>
         <article className="marketing-card docs-card">
           <h2>Integration guide</h2>
           <p>Current integration boundaries, auth expectations, and roadmap items that are not implemented yet.</p>
           <SiteLink className="inline-link" path="/docs/integrations" onNavigate={onNavigate}>
-            Open integration guide
+            Open integration guide →
           </SiteLink>
         </article>
         <article className="marketing-card docs-card">
           <h2>Brand guide</h2>
           <p>Visual language, voice, illustration style, and app-to-marketing consistency rules for future work.</p>
           <SiteLink className="inline-link" path="/docs/brand" onNavigate={onNavigate}>
-            Open brand guide
+            Open brand guide →
           </SiteLink>
         </article>
       </section>
@@ -877,7 +902,7 @@ function renderDocsApi(): JSX.Element {
   return (
     <>
       <section className="page-intro">
-        <p className="eyebrow marketing-eyebrow">API Guide</p>
+        <p className="eyebrow">API Guide</p>
         <h1>Current API surface for developers integrating with CustomerVoice.</h1>
         <p>
           The OpenAPI file remains the source of truth, but this page gives a faster operator view of what a developer
@@ -894,7 +919,7 @@ function renderDocsApi(): JSX.Element {
         </ul>
       </section>
 
-      <section className="marketing-card-grid three-up">
+      <section className="marketing-card-grid three-up" style={{ marginTop: '20px' }}>
         {apiGroups.map((group) => (
           <article className="marketing-card docs-card" key={group.title}>
             <h2>{group.title}</h2>
@@ -917,7 +942,7 @@ function renderDocsIntegrations(): JSX.Element {
   return (
     <>
       <section className="page-intro">
-        <p className="eyebrow marketing-eyebrow">Integration Guide</p>
+        <p className="eyebrow">Integration Guide</p>
         <h1>What integrators can use today and what remains roadmap work.</h1>
         <p>
           This prevents downstream teams from building on assumptions. Use the current API and auth surface today. Plan
@@ -934,7 +959,7 @@ function renderDocsIntegrations(): JSX.Element {
         </ul>
       </section>
 
-      <section className="marketing-card docs-card">
+      <section className="marketing-card docs-card" style={{ marginTop: '20px' }}>
         <h2>Planned later</h2>
         <ul className="marketing-list">
           {docsRoadmap.map((item) => (
@@ -950,13 +975,11 @@ function renderDocsBrand(): JSX.Element {
   return (
     <>
       <section className="page-intro">
-        <p className="eyebrow marketing-eyebrow">Brand Guide</p>
+        <p className="eyebrow">Brand Guide</p>
         <h1>Design and voice rules for keeping CustomerVoice coherent as the product grows.</h1>
         <p>
-          The long-form source document lives in
-          {' '}
-          <code>/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Brand-Guidelines.md</code>
-          . This page is the short operational summary for designers, engineers, and AI agents working in the repo.
+          The long-form source document lives in the docs directory.
+          This page is the short operational summary for designers, engineers, and AI agents working in the repo.
         </p>
       </section>
 
@@ -1017,7 +1040,6 @@ export function MarketingSite({ path, onNavigate }: { path: string; onNavigate: 
         <div className="marketing-header-inner">
           <SiteLink className="brand-mark" path="/" onNavigate={onNavigate}>
             <span>CustomerVoice</span>
-            <small>Feedback portal and product ops</small>
           </SiteLink>
           <nav className="marketing-nav" aria-label="Primary">
             {[
@@ -1053,7 +1075,7 @@ export function MarketingSite({ path, onNavigate }: { path: string; onNavigate: 
       <footer className="marketing-footer">
         <div>
           <strong>CustomerVoice</strong>
-          <p>Public feedback collection, internal prioritization, and shipped-update workflows in one product surface.</p>
+          <p>The feedback operations platform for modern SaaS teams. Capture, moderate, prioritize, and close the loop.</p>
         </div>
         <div className="footer-link-row">
           <SiteLink className="inline-link" path="/features" onNavigate={onNavigate}>

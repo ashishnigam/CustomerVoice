@@ -1,0 +1,885 @@
+# CustomerVoice Public Portal — Comprehensive Enhancement Plan
+
+## Executive Summary
+
+This plan transforms the CustomerVoice public portal from a basic read-and-vote interface into a **world-class, multi-use-case feedback platform** rivaling Microsoft Feedback Portal, UserVoice, ProductBoard, and Canny. The plan is organized in **3 phases**, each independently deployable, covering 7 distinct use case archetypes.
+
+---
+
+## Use Case Archetypes
+
+Before listing gaps, we define the diverse personas and contexts this portal must serve:
+
+| # | Use Case | Example | Key Requirements |
+|---|----------|---------|------------------|
+| 1 | **B2B SaaS Feedback** | Atlassian feature requests | Signed-in users, filtered by product/platform, categories, follow/subscribe, official responses |
+| 2 | **Enterprise Employee Feedback** | Internal HR suggestion box | Private portal (domain-restricted), anonymous option, manager-only categories |
+| 3 | **Political/Government** | GOV.uk public consultations | Fully public, no sign-in needed to view, anonymous voting, share buttons for social amplification |
+| 4 | **B2C Consumer Tech** | Apple/Google feature requests | Massive scale, platform filters (iOS/Android/Web), star/favorite, sign-in via social OAuth |
+| 5 | **Open Source Community** | VS Code feature requests | Public, GitHub-like, community-driven, rich commenting threads |
+| 6 | **Internal Product Team** | PM prioritization board | Private, RICE scoring visible, admin controls, roadmap view |
+| 7 | **Customer Advisory Board** | Invite-only enterprise panel | Access-by-link + email whitelist, NDA-protected ideas, restricted commenting |
+
+---
+
+## Gap Analysis: Current Portal vs Competitors
+
+### Current CustomerVoice Portal Capabilities
+- ✅ View ideas list with vote counts
+- ✅ Search ideas by keyword
+- ✅ Filter by pre-defined status tabs (All, New, Planned, In Progress, Completed)
+- ✅ Filter by categories (sidebar)
+- ✅ Sort by Top Voted / Most Discussed / Newest
+- ✅ Anonymous voting (visitor-id based)
+- ✅ Read-only detail slide-over with comments
+- ✅ Board description banner
+
+### Missing Features (Gap Analysis)
+
+| # | Feature | Microsoft | UserVoice | Canny | Current | Gap |
+|---|---------|-----------|-----------|-------|---------|-----|
+| 1 | **Submit new idea** from portal | ✅ | ✅ | ✅ | ❌ | **Critical** |
+| 2 | **Post comments** from portal | ✅ | ✅ | ✅ | ❌ | **Critical** |
+| 3 | **Share button** (copy link, social) | ✅ | ✅ | ✅ | ❌ | **High** |
+| 4 | **Follow/Subscribe** to an idea | ✅ | ✅ | ✅ | ❌ | **High** |
+| 5 | **Star/Favorite** ideas | ✅ | ✅ | ❌ | ❌ | **High** |
+| 6 | **User authentication** (sign-in/sign-up) | ✅ | ✅ | ✅ | ❌ | **Critical** |
+| 7 | **Anonymous vs authenticated** (admin toggle) | ✅ | ✅ | ✅ | ❌ | **Critical** |
+| 8 | **Dynamic filters** based on fields | ✅ | ✅ | ✅ | ❌ (hardcoded) | **High** |
+| 9 | **Platform/tag filter** | ✅ | ✅ | ✅ | ❌ | **Medium** |
+| 10 | **Official response** badge | ✅ | ✅ | ✅ | ❌ | **Medium** |
+| 11 | **Portal access modes** (public/link/private/domain) | Partial | ✅ | ✅ | ❌ (public only) | **Critical** |
+| 12 | **Pagination / infinite scroll** | ✅ | ✅ | ✅ | ❌ | **Medium** |
+| 13 | **Idea detail full page** (not just slide-over) | ✅ | ✅ | ✅ | ❌ | **Medium** |
+| 14 | **Status change notifications** to followers | ✅ | ✅ | ✅ | ❌ | **Medium** |
+| 15 | **Duplicate detection** on submit | ❌ | ✅ | ✅ | ❌ | **Low** |
+| 16 | **Rich text / markdown** in descriptions | ❌ | ✅ | ✅ | ❌ | **Low** |
+| 17 | **Custom branding** (logo, colors) | ✅ | ✅ | ✅ | ❌ | **Medium** |
+| 18 | **Changelog / "What's New"** section | ❌ | ✅ | ✅ | ❌ | **Low** |
+| 19 | **Mobile responsive** design | ✅ | ✅ | ✅ | Partial | **Medium** |
+| 20 | **Voter identity display** (avatar, name) | ✅ | ✅ | ✅ | ❌ | **Medium** |
+
+---
+
+## Phase 1: Core Engagement — Idea Submission, Comments, Auth & Access Control
+
+**Timeline:** Sprint 1-3 | **Priority:** Critical | **Goal:** Make the portal interactive and configurable
+
+### 1.1 Portal Access Control System (Admin + Backend)
+
+The admin must be able to configure how the public portal is accessed. This is the single most important architectural decision.
+
+#### Admin Configuration (new `board_settings` table)
+
+```
+board_settings:
+  board_id            TEXT PK REFERENCES boards(id)
+  access_mode         TEXT CHECK IN ('public', 'link_only', 'private', 'domain_restricted')
+  allowed_domains     TEXT[]         -- e.g. ['company.com', 'partner.org']
+  allowed_emails      TEXT[]         -- e.g. ['vip@client.com']  
+  require_auth_to_vote       BOOLEAN DEFAULT false
+  require_auth_to_comment    BOOLEAN DEFAULT true
+  require_auth_to_submit     BOOLEAN DEFAULT true
+  allow_anonymous_ideas      BOOLEAN DEFAULT false
+  custom_logo_url     TEXT
+  custom_accent_color TEXT
+  portal_title        TEXT           -- override board name
+  show_vote_count     BOOLEAN DEFAULT true
+  show_status_filter  BOOLEAN DEFAULT true
+  show_category_filter BOOLEAN DEFAULT true
+  enable_idea_submission BOOLEAN DEFAULT true
+  enable_commenting   BOOLEAN DEFAULT true
+  welcome_message     TEXT
+  created_at          TIMESTAMPTZ
+  updated_at          TIMESTAMPTZ
+```
+
+#### Access Mode Behaviors
+
+| Mode | Who Can View | Who Can Vote | Who Can Comment | Who Can Submit |
+|------|-------------|-------------|-----------------|----------------|
+| `public` | Anyone | Anyone (configurable) | Auth required (configurable) | Auth required (configurable) |
+| `link_only` | Anyone with the URL | Auth required | Auth required | Auth required |
+| `private` | Authenticated users only | Authenticated users only | Authenticated users only | Auth required |
+| `domain_restricted` | Users with email in allowed domains | Same | Same | Same |
+
+#### UI: Admin Board Settings Panel
+
+Add a new "Portal Settings" tab in the admin dashboard ([PortalApp.tsx](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/PortalApp.tsx)) under each board:
+
+```
+┌───────────────────────────────────────────────────┐
+│  Board Settings: CustomerVoice Features           │
+├───────────────────────────────────────────────────┤
+│                                                   │
+│  Access Mode: [Public ▼]                          │
+│  ┌─ Public: Anyone can access                     │
+│  ├─ Link Only: Accessible via shared link         │
+│  ├─ Private: Sign-in required to view             │
+│  └─ Domain Restricted: Only allowed domains       │
+│                                                   │
+│  Allowed Domains: [company.com, partner.org]      │
+│  Allowed Emails: [vip@client.com]                 │
+│                                                   │
+│  ┌─ Interaction Settings ──────────────────────┐  │
+│  │ ☑ Require auth to vote                      │  │
+│  │ ☑ Require auth to comment                   │  │
+│  │ ☑ Require auth to submit ideas              │  │
+│  │ ☐ Allow anonymous ideas                     │  │
+│  │ ☑ Enable idea submission                    │  │
+│  │ ☑ Enable commenting                         │  │
+│  │ ☑ Show vote counts                          │  │
+│  │ ☑ Show status filter                        │  │
+│  │ ☑ Show category filter                      │  │
+│  └─────────────────────────────────────────────┘  │
+│                                                   │
+│  Branding:                                        │
+│  Portal Title:  [Customer Feedback Portal    ]    │
+│  Welcome Msg:   [Share your ideas with us... ]    │
+│  Accent Color:  [#6366f1]  Logo URL: [........]   │
+│                                                   │
+│  [Save Settings]                                  │
+└───────────────────────────────────────────────────┘
+```
+
+### 1.2 Portal User Authentication
+
+#### Backend Changes
+
+**New API routes in [public.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/routes/public.ts):**
+
+```
+POST   /public/auth/register        - email + password registration
+POST   /public/auth/login           - email + password login
+POST   /public/auth/magic-link      - passwordless magic link
+GET    /public/auth/me               - get current session
+POST   /public/auth/logout           - clear session
+```
+
+**New tables:**
+
+```sql
+CREATE TABLE portal_users (
+  id              TEXT PRIMARY KEY,
+  email           TEXT NOT NULL UNIQUE,
+  display_name    TEXT,
+  password_hash   TEXT,           -- null if magic-link only
+  avatar_url      TEXT,
+  auth_provider   TEXT DEFAULT 'email',  -- 'email', 'google', 'github'
+  provider_id     TEXT,
+  email_verified  BOOLEAN DEFAULT false,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE portal_sessions (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES portal_users(id),
+  token           TEXT NOT NULL UNIQUE,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+#### UI: Auth Modal
+
+Portal displays a modal when auth is required:
+
+```
+┌─────────────────────────────────────┐
+│        Sign in to CustomerVoice     │
+│                                     │
+│  Email:    [you@company.com       ] │
+│  Password: [••••••••              ] │
+│                                     │
+│  [Sign In]    or    [Sign Up]       │
+│                                     │
+│  ──────── or continue with ──────── │
+│  [🔵 Google]  [⬛ GitHub]           │
+│                                     │
+│  [Send Magic Link instead]          │
+└─────────────────────────────────────┘
+```
+
+- Modal appears when user clicks Vote/Comment/Submit and auth is required
+- After sign-in, action is immediately performed
+- Session persisted via `localStorage` token
+- For `domain_restricted` mode, email domain is validated on registration
+
+### 1.3 Idea Submission from Portal
+
+#### Backend Changes
+
+**New API route in [public.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/routes/public.ts):**
+
+```
+POST /public/boards/:boardSlug/ideas
+Body: { title, description, categoryIds?, authorEmail?, authorName? }
+```
+
+- Validates board exists and submission is enabled via `board_settings`
+- If auth required, validates portal session token
+- If anonymous allowed, creates/uses visitor user
+- Returns created idea with auto-status `new`
+
+#### UI: "Submit Idea" Button + Modal
+
+```
+┌───── Public Portal Header ─────────────────────────────┐
+│  🔵 CustomerVoice | Feature Requests    [🔍 Search...] │
+│                                     [+ Submit Idea]     │
+└─────────────────────────────────────────────────────────┘
+
+Submit Idea Modal:
+┌─────────────────────────────────────────────────┐
+│  💡 Submit a New Idea                           │
+│                                                 │
+│  Title:                                         │
+│  [Dark mode for the dashboard               ]  │
+│                                                 │
+│  Description:                                   │
+│  ┌─────────────────────────────────────────────┐│
+│  │ I would love to have a dark mode option    ││
+│  │ for the dashboard to reduce eye strain     ││
+│  │ during late-night work sessions.           ││
+│  └─────────────────────────────────────────────┘│
+│                                                 │
+│  Category: [UI/UX ▼]                            │
+│                                                 │
+│  ┌─ Similar Ideas Found ────────────────────┐   │
+│  │ 🔍 "Dark theme support" (42 votes)       │   │
+│  │    → Click to vote instead of submitting  │   │
+│  └──────────────────────────────────────────┘   │
+│                                                 │
+│  [Cancel]                    [Submit Idea]      │
+└─────────────────────────────────────────────────┘
+```
+
+**Duplicate Detection**: As user types the title, search existing ideas and show matches (client-side debounced search using existing `/ideas?search=` endpoint).
+
+### 1.4 Public Commenting
+
+#### Backend Changes
+
+**New API route in [public.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/routes/public.ts):**
+
+```
+POST /public/boards/:boardSlug/ideas/:ideaId/comments
+Body: { body, authorEmail?, authorName? }
+```
+
+- Checks `board_settings.enable_commenting` and auth requirements
+- Respects `idea.comments_locked` flag
+- Returns created comment
+
+#### UI: Comment Box in Detail Panel
+
+Add a comment input at the bottom of the existing detail slide-over panel:
+
+```
+┌─────── Detail Panel (existing) ────────────┐
+│                                            │
+│  Comments (3)                              │
+│  ┌────────────────────────────────────────┐ │
+│  │ 👤 John D. · 2 days ago               │ │
+│  │ This would be amazing for night owls!  │ │
+│  ├────────────────────────────────────────┤ │
+│  │ 👤 Sarah M. · 1 week ago              │ │
+│  │ +1, our team really needs this.        │ │
+│  └────────────────────────────────────────┘ │
+│                                            │
+│  ┌── Add a comment ──────────────────────┐ │
+│  │ [Write your thoughts...              ]│ │
+│  │                           [Post ➤]   ││ │
+│  └───────────────────────────────────────┘ │
+│                                            │
+│  💬 Sign in to comment                     │ │
+│     (if auth required and not signed in)   │
+└────────────────────────────────────────────┘
+```
+
+### 1.5 Share Functionality
+
+#### UI: Share Button on Each Idea Card + Detail Panel
+
+```
+[Share ↗]  →  Dropdown:
+┌──────────────────────────┐
+│  📋 Copy link            │
+│  🐦 Share on Twitter/X   │
+│  💼 Share on LinkedIn    │
+│  📧 Share via Email      │
+└──────────────────────────┘
+```
+
+- Copy link generates `{origin}/portal/boards/{slug}/ideas/{ideaId}`
+- Social share opens pre-filled share URLs
+- Email share opens `mailto:` with subject and link
+- No backend changes needed (pure frontend)
+
+#### Backend Change for Deep Links:
+```
+GET /public/boards/:boardSlug/ideas/:ideaId  (already exists)
+```
+The portal needs to handle URL routing: `/portal/boards/:slug/ideas/:ideaId` should auto-open the detail panel for that idea.
+
+### 1.6 Dynamic Filters
+
+Replace hardcoded status tabs with dynamic filter bar driven by board settings and available data.
+
+#### UI: Filter Bar
+
+```
+┌─ Filters ──────────────────────────────────────────────┐
+│ Status: [All ▼]  Category: [All ▼]  Platform: [All ▼]  │
+│ Tags: [Any ▼]    Date: [Any time ▼]                     │
+│                                                         │
+│ Active filters: [Status: Planned ✕] [Category: UX ✕]   │
+│                 [Clear all filters]                      │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Filters are generated from the actual data (API returns available statuses, categories, tags)
+- Admin controls which filters are visible via `board_settings`
+- Tag/Platform requires new `idea_tags` table (see below)
+
+**New table:**
+```sql
+CREATE TABLE idea_tags (
+  id              TEXT PRIMARY KEY,
+  workspace_id    TEXT NOT NULL REFERENCES workspaces(id),
+  name            TEXT NOT NULL,
+  tag_type        TEXT DEFAULT 'general',  -- 'platform', 'priority', 'custom'
+  color_hex       TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(workspace_id, name)
+);
+
+CREATE TABLE idea_tag_links (
+  idea_id    TEXT NOT NULL REFERENCES ideas(id),
+  tag_id     TEXT NOT NULL REFERENCES idea_tags(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY(idea_id, tag_id)
+);
+```
+
+### Phase 1 Summary of Changes
+
+#### Database Migrations (new migration `005_portal_access_and_engagement`)
+- `board_settings` table
+- `portal_users` table
+- `portal_sessions` table
+- `idea_tags` + `idea_tag_links` tables
+
+#### API Routes (additions to [public.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/routes/public.ts))
+- `GET /public/boards/:boardSlug/settings` — returns portal config
+- `POST /public/auth/register`
+- `POST /public/auth/login`
+- `POST /public/auth/magic-link`
+- `GET /public/auth/me`
+- `POST /public/auth/logout`
+- `POST /public/boards/:boardSlug/ideas` — submit new idea
+- `POST /public/boards/:boardSlug/ideas/:ideaId/comments` — post comment
+- `GET /public/boards/:boardSlug/tags` — list available tags
+
+#### Admin Dashboard Changes ([PortalApp.tsx](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/PortalApp.tsx))
+- New "Portal Settings" tab for each board
+- Board settings form with access mode, auth toggles, branding
+
+#### Public Portal Changes ([CustomerPortal.tsx](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/CustomerPortal.tsx))
+- Auth modal (sign-in/sign-up)
+- Submit idea button + modal with duplicate detection
+- Comment posting in detail panel
+- Share dropdown on idea cards and detail panel
+- Dynamic filter bar replacing hardcoded status tabs
+- Deep link support for `/portal/boards/:slug/ideas/:ideaId`
+- Auth-gated actions (vote/comment/submit based on board settings)
+- Session persistence in localStorage
+
+---
+
+## Phase 2: Engagement & Personalization — Follow, Favorite, Notifications, Full Detail Page
+
+**Timeline:** Sprint 4-6 | **Priority:** High | **Goal:** Keep users engaged and coming back
+
+### 2.1 Follow/Subscribe to Ideas
+
+#### Backend Changes
+
+**New table:**
+```sql
+CREATE TABLE idea_subscriptions (
+  idea_id         TEXT NOT NULL REFERENCES ideas(id),
+  user_id         TEXT NOT NULL REFERENCES portal_users(id),
+  notify_on       TEXT[] DEFAULT ARRAY['status_change', 'official_response', 'new_comment'],
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY(idea_id, user_id)
+);
+```
+
+**New API routes:**
+```
+POST   /public/boards/:boardSlug/ideas/:ideaId/subscribe
+DELETE /public/boards/:boardSlug/ideas/:ideaId/subscribe
+GET    /public/me/subscriptions  — list all followed ideas
+```
+
+#### UI: Follow Button
+
+On each idea card and in the detail panel:
+```
+[🔔 Follow]  →  toggles to  [🔔 Following ✓]
+```
+
+When clicked while not following:
+```
+┌───────────────────────────────────┐
+│  🔔 Follow this idea             │
+│                                   │
+│  Notify me when:                  │
+│  ☑ Status changes                 │
+│  ☑ Official response posted       │
+│  ☑ New comments added             │
+│                                   │
+│  [Follow]                         │
+└───────────────────────────────────┘
+```
+
+### 2.2 Star/Favorite Ideas
+
+#### Backend Changes
+
+**New table:**
+```sql
+CREATE TABLE idea_favorites (
+  idea_id    TEXT NOT NULL REFERENCES ideas(id),
+  user_id    TEXT NOT NULL REFERENCES portal_users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY(idea_id, user_id)
+);
+```
+
+**New API routes:**
+```
+POST   /public/boards/:boardSlug/ideas/:ideaId/favorite
+DELETE /public/boards/:boardSlug/ideas/:ideaId/favorite
+GET    /public/me/favorites  — list user's favorited ideas
+```
+
+#### UI: Star Icon
+
+```
+Each idea card:  ☆ (empty) → ★ (filled, golden)
+```
+
+A new sidebar tab: **"My Favorites"** that shows only favorited ideas.
+
+### 2.3 Full Idea Detail Page
+
+Instead of only a slide-over panel, support a full-page detail view at `/portal/boards/:slug/ideas/:ideaId`.
+
+#### UI: Full Detail Page Layout
+
+```
+┌─── Header (existing) ──────────────────────────────────────────────┐
+│  ← Back to Feature Requests   |   CustomerVoice | Board Name      │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  ┌─── Main Content (70%) ─────────┐  ┌─── Sidebar (30%) ──────┐  │
+│  │                                │  │                          │  │
+│  │  [Status Badge: Planned]       │  │  ▲ 142 Votes             │  │
+│  │                                │  │  [Upvote]                │  │
+│  │  # Dark Mode Support           │  │                          │  │
+│  │                                │  │  ──────────────────      │  │
+│  │  Submitted by John D.          │  │  Status: Planned  📋     │  │
+│  │  2 weeks ago                   │  │  Category: UI/UX         │  │
+│  │                                │  │  Tags: Desktop, Mobile   │  │
+│  │  ────────────────────────────  │  │  Created: Mar 1, 2026    │  │
+│  │                                │  │  Updated: Mar 5, 2026    │  │
+│  │  I would love to have a dark   │  │                          │  │
+│  │  mode option for the dashboard │  │  ──────────────────      │  │
+│  │  to reduce eye strain during   │  │  [🔔 Follow] [★ Fav]    │  │
+│  │  late-night work sessions.     │  │  [↗ Share]               │  │
+│  │                                │  │                          │  │
+│  │  ────────────────────────────  │  │  ──────────────────      │  │
+│  │                                │  │  👥 42 Followers          │  │
+│  │  📢 Official Response          │  │  💬 12 Comments           │  │
+│  │  ┌──────────────────────────┐  │  │                          │  │
+│  │  │ 🔵 Product Team · 1d ago│  │  └──────────────────────────┘  │
+│  │  │ We're planning to ship  │  │                                │
+│  │  │ dark mode in Q2 2026.   │  │                                │
+│  │  └──────────────────────────┘  │                                │
+│  │                                │                                │
+│  │  ────────────────────────────  │                                │
+│  │                                │                                │
+│  │  Comments (12)                 │                                │
+│  │  ┌──────────────────────────┐  │                                │
+│  │  │ 👤 Sarah · 3 days ago   │  │                                │
+│  │  │ Can't wait for this!    │  │                                │
+│  │  │          [▲ 5] [Reply]  │  │                                │
+│  │  ├──────────────────────────┤  │                                │
+│  │  │   ↳ 👤 Mike · 2 days   │  │                                │
+│  │  │     Same here! +1       │  │                                │
+│  │  └──────────────────────────┘  │                                │
+│  │                                │                                │
+│  │  ┌── Add a comment ────────┐  │                                │
+│  │  │ [Your thoughts...     ] │  │                                │
+│  │  │              [Post ➤]   │  │                                │
+│  │  └─────────────────────────┘  │                                │
+│  └────────────────────────────────┘                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.4 Official Response / Admin Reply
+
+#### Backend Changes
+
+**New column on `idea_comments`:**
+```sql
+ALTER TABLE idea_comments ADD COLUMN is_official BOOLEAN DEFAULT false;
+ALTER TABLE idea_comments ADD COLUMN is_team_member BOOLEAN DEFAULT false;
+```
+
+When an admin posts a comment via the admin dashboard, it's flagged as `is_official = true`. The public portal highlights these with a distinct badge.
+
+**New API route:**
+```
+GET /public/boards/:boardSlug/ideas/:ideaId/comments?include_official=true
+```
+
+#### UI: Official Response Badge
+
+Official comments are displayed with a prominent blue/green badge:
+```
+📢 Official Response  ·  Product Team  ·  1 day ago
+"We're excited to share that dark mode is now on our Q2 roadmap!"
+```
+
+### 2.5 User Profile & Activity
+
+**New API routes:**
+```
+GET    /public/me/profile           — user info
+PATCH  /public/me/profile           — update display name, avatar
+GET    /public/me/ideas             — ideas submitted by user
+GET    /public/me/votes             — ideas user has voted on
+GET    /public/me/activity          — combined activity feed
+```
+
+#### UI: User Menu (Top Right)
+
+```
+When signed in:
+┌──────────────────────────┐
+│  👤 John Doe  ▼          │
+├──────────────────────────┤
+│  📋 My Ideas (5)         │
+│  ⬆ My Votes (23)         │
+│  ★ My Favorites (8)      │
+│  🔔 Following (12)       │
+│  ──────────────────────  │
+│  ⚙ Settings              │
+│  🚪 Sign Out             │
+└──────────────────────────┘
+```
+
+### 2.6 Pagination & Infinite Scroll
+
+- Add `offset` / `cursor` parameter to the ideas list API
+- Frontend uses infinite scroll (intersection observer) or pagination buttons
+- Default page size: 20 ideas
+
+### 2.7 Mobile-First Responsive Design
+
+Rework the CSS to be fully mobile-responsive:
+- **Mobile**: Single column, bottom sheet for filters, swipe for detail
+- **Tablet**: Two-column with collapsible sidebar
+- **Desktop**: Full three-column layout (sidebar + list + detail)
+
+### Phase 2 Summary of Changes
+
+#### Database Migrations (`006_engagement_features`)
+- `idea_subscriptions` table
+- `idea_favorites` table
+- `idea_comments` columns: `is_official`, `is_team_member`
+
+#### API Routes
+- Subscribe/unsubscribe endpoints
+- Favorite/unfavorite endpoints
+- User profile endpoints (profile, my ideas, my votes, my favorites, activity)
+- Pagination support on list endpoints
+
+#### Frontend Changes
+- Full detail page view with routing
+- Follow/subscribe button with notification preferences
+- Star/favorite toggle with "My Favorites" view
+- Official response badge in comments
+- User menu with activity sections
+- Infinite scroll / pagination
+- Comprehensive mobile responsive CSS
+
+---
+
+## Phase 3: Platform Excellence — Branding, Changelog, Roadmap, Analytics, Integrations
+
+**Timeline:** Sprint 7-10 | **Priority:** Medium | **Goal:** Premium enterprise-grade portal
+
+### 3.1 Custom Branding & Theming
+
+#### Admin Configuration (extend `board_settings`)
+```sql
+ALTER TABLE board_settings ADD COLUMN custom_css TEXT;
+ALTER TABLE board_settings ADD COLUMN favicon_url TEXT;
+ALTER TABLE board_settings ADD COLUMN header_bg_color TEXT;
+ALTER TABLE board_settings ADD COLUMN font_family TEXT;
+ALTER TABLE board_settings ADD COLUMN hide_powered_by BOOLEAN DEFAULT false;
+```
+
+#### UI: Theme Preview in Admin
+
+Live preview panel showing how the portal looks with custom branding.
+
+### 3.2 Public Roadmap View
+
+A new tab or view mode showing a Kanban-style roadmap:
+
+```
+┌─── Public Roadmap ──────────────────────────────────────────────┐
+│ [List View]  [🗺 Roadmap View]                                  │
+├──────────────┬──────────────┬──────────────┬───────────────────┤
+│  📋 Planned  │  ⚡ Building  │  🎉 Shipped  │  ❌ Not Planned   │
+│  (12 ideas)  │  (5 ideas)   │  (28 ideas)  │  (3 ideas)       │
+├──────────────┼──────────────┼──────────────┼───────────────────┤
+│ Dark Mode    │ API v2       │ CSV Export   │ Desktop App      │
+│ 142 votes    │ 89 votes     │ 201 votes    │ 15 votes         │
+│              │              │              │                   │
+│ Webhooks     │ Dashboard    │ SSO Support  │                   │
+│ 98 votes     │ Refresh      │ 156 votes    │                   │
+│              │ 67 votes     │              │                   │
+│ Teams Int.   │              │ Mobile App   │                   │
+│ 76 votes     │              │ 134 votes    │                   │
+└──────────────┴──────────────┴──────────────┴───────────────────┘
+```
+
+### 3.3 Changelog / "What's New"
+
+**New table:**
+```sql
+CREATE TABLE changelog_entries (
+  id              TEXT PRIMARY KEY,
+  workspace_id    TEXT NOT NULL REFERENCES workspaces(id),
+  board_id        TEXT REFERENCES boards(id),
+  title           TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  entry_type      TEXT CHECK IN ('feature', 'improvement', 'bugfix', 'announcement'),
+  related_idea_ids TEXT[],
+  published_at    TIMESTAMPTZ,
+  created_by      TEXT REFERENCES users(id),
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+#### UI: Changelog Tab
+
+```
+┌─── What's New ──────────────────────────────────────┐
+│                                                     │
+│  🎉 March 2026                                      │
+│  ──────────────────────────────────────────────────  │
+│  🟢 FEATURE  Dark Mode Support                      │
+│  The most requested feature is here! Enable dark    │
+│  mode from Settings > Appearance.                   │
+│  → Based on your idea: "Dark Mode" (142 votes)      │
+│                                                     │
+│  🔵 IMPROVEMENT  Faster Dashboard Loading           │
+│  Dashboard now loads 3x faster with optimized       │
+│  data fetching.                                     │
+│                                                     │
+│  🟡 BUGFIX  Fixed CSV export encoding               │
+│  CSV exports now properly handle unicode chars.     │
+│  → Based on your idea: "Fix CSV" (23 votes)         │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### 3.4 Email Notifications
+
+**Notification triggers:**
+- Status change on followed idea
+- Official response on followed idea
+- New comment on followed idea
+- Idea you submitted gets a milestone (10, 50, 100 votes)
+- Weekly digest of top ideas (optional)
+
+Leverages existing `notification_jobs` + `notification_job_recipients` tables.
+
+### 3.5 Comment Threading & Upvotes
+
+Add nested comment replies and comment upvotes:
+
+```sql
+ALTER TABLE idea_comments ADD COLUMN parent_comment_id TEXT REFERENCES idea_comments(id);
+ALTER TABLE idea_comments ADD COLUMN upvote_count INT DEFAULT 0;
+
+CREATE TABLE comment_upvotes (
+  comment_id  TEXT NOT NULL REFERENCES idea_comments(id),
+  user_id     TEXT NOT NULL REFERENCES portal_users(id),
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY(comment_id, user_id)
+);
+```
+
+### 3.6 Rich Text / Markdown Support
+
+- Idea descriptions and comments support Markdown
+- Frontend renders markdown to HTML (use a lightweight lib like `marked`)
+- Sanitize HTML on the server side
+
+### 3.7 Embeddable Widget
+
+A small JS widget that can be embedded on any website:
+
+```html
+<script src="https://portal.customervoice.com/widget.js" 
+        data-board="customervoice-features"
+        data-theme="dark"></script>
+```
+
+Shows a floating feedback button → opens a mini portal in an iframe.
+
+### 3.8 API Webhooks for Integrations
+
+```sql
+CREATE TABLE webhooks (
+  id              TEXT PRIMARY KEY,
+  workspace_id    TEXT NOT NULL REFERENCES workspaces(id),
+  url             TEXT NOT NULL,
+  events          TEXT[] NOT NULL,  -- ['idea.created', 'idea.voted', 'comment.created']
+  secret          TEXT NOT NULL,
+  active          BOOLEAN DEFAULT true,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Events: `idea.created`, `idea.voted`, `idea.status_changed`, `comment.created`, `idea.subscribed`
+
+### Phase 3 Summary of Changes
+
+#### Database Migrations (`007_platform_excellence`)
+- `board_settings` extended columns
+- `changelog_entries` table
+- Comment threading columns (`parent_comment_id`, `upvote_count`)
+- `comment_upvotes` table
+- `webhooks` table
+
+#### API Routes
+- Changelog CRUD + public listing
+- Comment thread endpoints
+- Comment upvote endpoints
+- Webhook management endpoints
+- Widget configuration endpoint
+
+#### Frontend Changes
+- Custom branding application
+- Public roadmap Kanban view
+- Changelog / "What's New" page
+- Threaded comments with upvotes
+- Markdown rendering
+- Embeddable widget iframe
+
+---
+
+## Cross-Cutting Concerns (All Phases)
+
+### Security
+- Rate limiting on public endpoints (10 req/min for submissions, 30 for votes)
+- CSRF protection for portal auth
+- XSS prevention (sanitize all user input, especially markdown)
+- SQL injection prevention (parameterized queries — already in place)
+- Access mode enforcement at API level (not just UI)
+
+### Performance
+- Cache board settings (invalidate on admin update)
+- Paginate all list endpoints
+- Use database indexes for all query patterns
+- Consider CDN for static assets in production
+
+### Analytics (Admin Side)
+- Track page views, unique visitors per board
+- Funnel: visit → vote → comment → submit
+- Top referrers for shared ideas
+
+---
+
+## Verification Plan
+
+### Automated Tests
+
+Each phase should have integration tests covering:
+
+**Phase 1 verification:**
+```bash
+# Run the API server
+cd apps/api && pnpm dev
+
+# Run existing tests (if any)
+pnpm test
+
+# Manual browser verification via browser subagent:
+# 1. Navigate to http://localhost:3000/portal/boards/customervoice-features
+# 2. Verify "Submit Idea" button appears
+# 3. Click Submit Idea → verify modal opens
+# 4. Verify share button appears on idea cards
+# 5. Verify auth modal appears when action requires sign-in
+# 6. Verify dynamic filters are rendered
+```
+
+**Phase 2 verification:**
+```bash
+# Browser verification:
+# 1. Navigate to idea detail page via /portal/boards/:slug/ideas/:ideaId
+# 2. Verify Follow button appears and toggles
+# 3. Verify Star/Favorite button works
+# 4. Verify user menu appears when signed in
+# 5. Verify infinite scroll loads more ideas
+# 6. Verify mobile responsive layout at 375px width
+```
+
+**Phase 3 verification:**
+```bash
+# Browser verification:
+# 1. Verify custom branding renders correctly
+# 2. Navigate to Roadmap view and verify Kanban layout
+# 3. Navigate to Changelog and verify entries display
+# 4. Verify threaded comments render with reply buttons
+# 5. Verify markdown rendering in idea descriptions
+```
+
+### Manual Verification
+- Admin configures board with each access mode and tests portal behavior
+- User tests all auth flows: register → login → vote → comment → submit
+- Share functionality tested across Twitter, LinkedIn, email
+- Mobile testing on real device or DevTools responsive mode
+
+---
+
+## File Change Summary
+
+| Phase | File | Action | Description |
+|-------|------|--------|-------------|
+| 1 | [apps/api/src/db/migrations.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/db/migrations.ts) | MODIFY | Add migration `005` with new tables |
+| 1 | [apps/api/src/db/repositories.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/db/repositories.ts) | MODIFY | Add CRUD for board_settings, portal_users, portal_sessions, tags |
+| 1 | [apps/api/src/routes/public.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/routes/public.ts) | MODIFY | Add auth, submit, comment, settings endpoints |
+| 1 | [apps/web/src/CustomerPortal.tsx](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/CustomerPortal.tsx) | MODIFY | Add auth modal, submit modal, comment input, share, dynamic filters |
+| 1 | [apps/web/src/PortalApp.tsx](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/PortalApp.tsx) | MODIFY | Add Portal Settings tab in admin dashboard |
+| 1 | [apps/web/src/styles.css](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/styles.css) | MODIFY | New styles for modals, filters, auth UI |
+| 2 | [apps/api/src/db/migrations.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/db/migrations.ts) | MODIFY | Add migration `006` |
+| 2 | [apps/api/src/db/repositories.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/db/repositories.ts) | MODIFY | Subscribe, favorite, pagination queries |
+| 2 | [apps/api/src/routes/public.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/routes/public.ts) | MODIFY | Subscribe, favorite, user profile endpoints |
+| 2 | [apps/web/src/CustomerPortal.tsx](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/CustomerPortal.tsx) | MODIFY | Full detail page, follow, favorite, user menu |
+| 2 | [apps/web/src/styles.css](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/styles.css) | MODIFY | Detail page, mobile responsive, user menu styles |
+| 3 | [apps/api/src/db/migrations.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/db/migrations.ts) | MODIFY | Add migration `007` |
+| 3 | [apps/api/src/db/repositories.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/db/repositories.ts) | MODIFY | Changelog, webhooks, comment threads |
+| 3 | [apps/api/src/routes/public.ts](file:///Users/ashishnigam/Startups/CustomerVoice/apps/api/src/routes/public.ts) | MODIFY | Changelog, widget, threaded comments |
+| 3 | [apps/web/src/CustomerPortal.tsx](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/CustomerPortal.tsx) | MODIFY | Roadmap view, changelog, threaded comments, markdown |
+| 3 | [apps/web/src/styles.css](file:///Users/ashishnigam/Startups/CustomerVoice/apps/web/src/styles.css) | MODIFY | Roadmap Kanban, changelog, branding overrides |
