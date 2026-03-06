@@ -46,6 +46,7 @@ import {
 import { asyncHandler } from '../lib/async-handler.js';
 import multer from 'multer';
 import { uploadFileBuffer } from '../lib/storage.js';
+import { addClient, broadcast } from '../lib/sse.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
@@ -128,6 +129,28 @@ async function getPortalUser(req: { header: (name: string) => string | undefined
 }
 
 export const publicRouter = Router();
+
+/* ── GET /public/boards/:boardSlug/stream ── */
+publicRouter.get(
+    '/public/boards/:boardSlug/stream',
+    asyncHandler(async (req, res) => {
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        // Prevent buffering in proxies
+        res.flushHeaders();
+
+        addClient(board.id, res);
+    }),
+);
 
 /* ── GET /public/boards/:boardSlug ── */
 publicRouter.get(
@@ -387,6 +410,7 @@ publicRouter.post(
             userId,
         });
 
+        broadcast(board.id, 'idea.voted', { ideaId, delta: 1 });
         res.status(200).json(vote);
     }),
 );
@@ -413,6 +437,7 @@ publicRouter.delete(
             userId,
         });
 
+        broadcast(board.id, 'idea.voted', { ideaId, delta: -1 });
         res.status(200).json(vote);
     }),
 );
@@ -529,6 +554,7 @@ publicRouter.post(
                 parentCommentId: parsed.data.parentCommentId,
             });
 
+            broadcast(board.id, 'comment.created', { ideaId, comment });
             res.status(201).json(comment);
         } catch (err) {
             if (err instanceof Error && err.message === 'idea_comments_locked') {

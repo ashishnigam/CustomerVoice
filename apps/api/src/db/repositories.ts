@@ -50,6 +50,7 @@ interface IdeaRow {
   updated_at: string;
   vote_count?: number | string | null;
   comment_count?: number | string | null;
+  impact_score?: number | string | null;
   viewer_has_voted?: boolean | null;
   category_ids?: string[] | null;
   category_names?: string[] | null;
@@ -198,6 +199,7 @@ export interface IdeaRecord {
   updatedAt: string;
   voteCount: number;
   commentCount: number;
+  impactScore: number;
   viewerHasVoted: boolean;
   categoryIds: string[];
   categoryNames: string[];
@@ -371,6 +373,7 @@ function mapIdea(row: IdeaRow): IdeaRecord {
     updatedAt: row.updated_at,
     voteCount: Number(row.vote_count ?? 0),
     commentCount: Number(row.comment_count ?? 0),
+    impactScore: Number(row.impact_score ?? 0),
     viewerHasVoted: Boolean(row.viewer_has_voted ?? false),
     categoryIds: row.category_ids ?? [],
     categoryNames: row.category_names ?? [],
@@ -760,6 +763,7 @@ export async function listIdeas(params: {
         i.updated_at,
         COALESCE(v.vote_count, 0)::int AS vote_count,
         COALESCE(c.comment_count, 0)::int AS comment_count,
+        COALESCE(v.impact_score, 0)::numeric AS impact_score,
         CASE
           WHEN $7::text IS NULL THEN FALSE
           ELSE EXISTS (
@@ -799,10 +803,11 @@ export async function listIdeas(params: {
         ) AS category_slugs
       FROM ideas i
       LEFT JOIN (
-        SELECT workspace_id, idea_id, COUNT(*) AS vote_count
-        FROM idea_votes
-        WHERE workspace_id = $1
-        GROUP BY workspace_id, idea_id
+        SELECT iv.workspace_id, iv.idea_id, COUNT(*) AS vote_count, SUM(COALESCE(pu.mrr, 0)) AS impact_score
+        FROM idea_votes iv
+        LEFT JOIN portal_users pu ON pu.id = iv.user_id
+        WHERE iv.workspace_id = $1
+        GROUP BY iv.workspace_id, iv.idea_id
       ) v ON v.workspace_id = i.workspace_id AND v.idea_id = i.id
       LEFT JOIN (
         SELECT workspace_id, idea_id, COUNT(*) AS comment_count
@@ -890,6 +895,12 @@ export async function findIdea(params: {
           FROM idea_comments ic
           WHERE ic.workspace_id = i.workspace_id AND ic.idea_id = i.id AND ic.active = TRUE
         ) AS comment_count,
+        (
+          SELECT COALESCE(SUM(pu.mrr), 0)::numeric
+          FROM idea_votes iv
+          LEFT JOIN portal_users pu ON pu.id = iv.user_id
+          WHERE iv.workspace_id = i.workspace_id AND iv.idea_id = i.id
+        ) AS impact_score,
         CASE
           WHEN $4::text IS NULL THEN FALSE
           ELSE EXISTS (
@@ -969,6 +980,12 @@ export async function findIdeaById(params: {
           FROM idea_comments ic
           WHERE ic.workspace_id = i.workspace_id AND ic.idea_id = i.id AND ic.active = TRUE
         ) AS comment_count,
+        (
+          SELECT COALESCE(SUM(pu.mrr), 0)::numeric
+          FROM idea_votes iv
+          LEFT JOIN portal_users pu ON pu.id = iv.user_id
+          WHERE iv.workspace_id = i.workspace_id AND iv.idea_id = i.id
+        ) AS impact_score,
         CASE
           WHEN $3::text IS NULL THEN FALSE
           ELSE EXISTS (
@@ -3728,4 +3745,47 @@ export async function getActiveWebhooksForEvent(workspaceId: string, event: stri
     [workspaceId, event]
   );
   return result.rows.map(mapWebhook);
+}
+
+export async function syncPortalUserMrr(email: string, mrr: number): Promise<void> {
+  await query(
+    `UPDATE portal_users SET mrr = $1, updated_at = NOW() WHERE email = $2`,
+    [mrr, email.toLowerCase().trim()]
+  );
+}
+
+/* ── Enterprise SSO ── */
+
+export interface SsoConnectionRecord {
+  id: string;
+  workspaceId: string;
+  provider: 'okta' | 'azure' | 'custom_saml' | 'oidc';
+  domain: string;
+  clientId: string | null;
+  clientSecret: string | null;
+  metadataUrl: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
+export async function findSsoConnectionByDomain(domain: string): Promise<SsoConnectionRecord | null> {
+  const result = await query(
+    `SELECT * FROM sso_connections WHERE domain = $1 AND active = TRUE LIMIT 1`,
+    [domain.toLowerCase().trim()]
+  );
+
+  if ((result.rowCount ?? 0) === 0) return null;
+
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    provider: row.provider,
+    domain: row.domain,
+    clientId: row.client_id,
+    clientSecret: row.client_secret,
+    metadataUrl: row.metadata_url,
+    active: row.active,
+    createdAt: row.created_at,
+  };
 }

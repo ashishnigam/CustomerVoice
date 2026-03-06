@@ -3,6 +3,55 @@
    Premium glassmorphism + gradient design language
    ============================================================ */
 
+/* --- Widget Mode Overrides --- */
+.cp-shell.is-widget {
+  background: var(--cv-bg);
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.cp-shell.is-widget .cp-header {
+  padding: 0.75rem 1rem;
+}
+
+.cp-shell.is-widget .cp-header-search {
+  display: none;
+}
+
+.cp-shell.is-widget .cp-brand-sep,
+.cp-shell.is-widget .cp-board-name {
+  display: none;
+}
+
+.cp-shell.is-widget .cp-board-banner,
+.cp-shell.is-widget .cp-stats-bar,
+.cp-shell.is-widget .cp-portal-nav,
+.cp-shell.is-widget .cp-sidebar,
+.cp-shell.is-widget .cp-status-tabs {
+  display: none;
+}
+
+.cp-shell.is-widget .cp-body {
+  padding: 0;
+  max-width: 100%;
+}
+
+.cp-shell.is-widget .cp-main {
+  width: 100%;
+}
+
+.cp-shell.is-widget .cp-idea-card {
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+}
+
+.cp-shell.is-widget .cp-detail-panel {
+  width: 100%;
+  right: 0;
+  border-radius: 0;
+}
+
 /* --- Design Tokens --- */
 :root {
   /* Brand palette */

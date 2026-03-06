@@ -8,6 +8,7 @@ import { ideasRouter } from './routes/ideas.js';
 import { membersRouter } from './routes/members.js';
 import { publicRouter } from './routes/public.js';
 import { webhooksRouter } from './routes/webhooks.js';
+import { ssoRouter } from './routes/sso.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -18,6 +19,7 @@ export function createApp(): express.Express {
 
   // Public routes (no auth required)
   app.use('/api/v1', publicRouter);
+  app.use('/api/v1', ssoRouter);
 
   // Authenticated routes
   app.use('/api/v1', requireActor, boardsRouter);

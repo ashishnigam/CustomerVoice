@@ -61,6 +61,7 @@ type Idea = {
   updatedAt: string;
   voteCount: number;
   commentCount: number;
+  impactScore: number;
   viewerHasVoted: boolean;
   categoryIds: string[];
   categoryNames: string[];
@@ -1571,7 +1572,7 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
                           >
                             <span className="kanban-card-title">{idea.title}</span>
                             <div className="kanban-card-meta">
-                              <span className="kanban-card-vote">▲ {idea.voteCount}</span>
+                              <span className="kanban-card-vote">▲ {idea.voteCount} / ${idea.impactScore || 0}</span>
                               <span className="kanban-card-comments">💬 {idea.commentCount}</span>
                             </div>
                             {idea.categoryNames.length > 0 ? (
@@ -1687,6 +1688,8 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
                         <span className={statusClassName[idea.status]}>{statusLabel[idea.status]}</span>
                         <span className={moderationClassName[idea.moderationState]}>{moderationLabel[idea.moderationState]}</span>
                         <span>{idea.voteCount} votes</span>
+                        <span>&middot;</span>
+                        <span>{idea.impactScore ? `$${idea.impactScore.toFixed(2)} MRR` : '$0 MRR'}</span>
                         <span>{idea.commentCount} comments</span>
                       </div>
                     </div>

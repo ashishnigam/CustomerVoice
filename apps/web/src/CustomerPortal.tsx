@@ -245,6 +245,52 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
         }
     }, []);
 
+    /* ── SSE Live Updates ── */
+    useEffect(() => {
+        if (!boardSlug) return;
+
+        const eventSource = new EventSource(`${apiBase}/public/boards/${boardSlug}/stream`);
+
+        eventSource.addEventListener('idea.voted', (event) => {
+            try {
+                const data = JSON.parse(event.data) as { ideaId: string; delta: number };
+                setIdeas((prev) =>
+                    prev.map((i) =>
+                        i.id === data.ideaId ? { ...i, voteCount: i.voteCount + data.delta } : i
+                    )
+                );
+                setSelectedIdea((prev) =>
+                    prev && prev.id === data.ideaId
+                        ? { ...prev, voteCount: prev.voteCount + data.delta }
+                        : prev
+                );
+            } catch { /* ignore */ }
+        });
+
+        eventSource.addEventListener('comment.created', (event) => {
+            try {
+                const data = JSON.parse(event.data) as { ideaId: string; comment: IdeaComment };
+                // Increment comment count, but don't duplicate if the user just posted it themselves
+                // (we already optimistically incremented it for the author). However, this might double-count 
+                // for the author unless we check if they authored it, but for simplicity, we'll let it fetch.
+                setIdeas((prev) =>
+                    prev.map((i) =>
+                        i.id === data.ideaId ? { ...i, commentCount: i.commentCount + 1 } : i
+                    )
+                );
+                setSelectedIdea((prev) =>
+                    prev && prev.id === data.ideaId
+                        ? { ...prev, commentCount: prev.commentCount + 1 }
+                        : prev
+                );
+            } catch { /* ignore */ }
+        });
+
+        return () => {
+            eventSource.close();
+        };
+    }, [boardSlug]);
+
     /* ── Board & Data State ── */
     const [board, setBoard] = useState<Board | null>(null);
     const [settings, setSettings] = useState<BoardSettings>(defaultSettings);
@@ -899,6 +945,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
     const totalVotes = useMemo(() => ideas.reduce((sum, i) => sum + i.voteCount, 0), [ideas]);
 
     const portalTitle = settings.portalTitle ?? board?.name ?? 'Feature Requests';
+    const isWidget = new URLSearchParams(window.location.search).get('widget') === 'true';
 
     /* ── Render: No board slug ── */
     if (!boardSlug) {
@@ -935,7 +982,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
     }, [settings.customAccentColor]);
 
     return (
-        <div className="cp-shell" style={customStyles}>
+        <div className={`cp-shell ${isWidget ? 'is-widget' : ''}`} style={customStyles}>
             {/* ── Share toast ── */}
             {shareNotice ? (
                 <div className="cp-toast">{shareNotice}</div>

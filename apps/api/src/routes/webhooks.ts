@@ -5,6 +5,7 @@ import {
     deleteWebhook,
     listWebhooks,
     updateWebhook,
+    syncPortalUserMrr,
 } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { enforceWorkspaceScope, requirePermission } from '../middleware/auth.js';
@@ -100,3 +101,24 @@ webhooksRouter.delete(
         res.status(200).json({ success: true });
     }),
 );
+
+const syncMrrSchema = z.object({
+    email: z.string().email(),
+    mrr: z.number().min(0),
+});
+
+webhooksRouter.post(
+    '/workspaces/:workspaceId/users/mrr',
+    requirePermission('policy:write'),
+    asyncHandler(async (req, res) => {
+        const parsed = syncMrrSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ error: 'invalid_data', details: parsed.error.issues });
+            return;
+        }
+
+        await syncPortalUserMrr(parsed.data.email, parsed.data.mrr);
+        res.status(200).json({ success: true });
+    }),
+);
+

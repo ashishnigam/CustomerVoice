@@ -491,6 +491,31 @@ const migrations: Migration[] = [
       ALTER TABLE idea_comments ADD COLUMN IF NOT EXISTS is_internal BOOLEAN NOT NULL DEFAULT false;
     `,
   },
+  {
+    id: '012_mrr_tracking',
+    sql: `
+      ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS mrr NUMERIC(14, 2) NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    id: '013_enterprise_sso',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sso_connections (
+        id              TEXT PRIMARY KEY,
+        workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        provider        TEXT NOT NULL CHECK (provider IN ('okta', 'azure', 'custom_saml', 'oidc')),
+        domain          TEXT NOT NULL,
+        client_id       TEXT,
+        client_secret   TEXT,
+        metadata_url    TEXT,
+        active          BOOLEAN NOT NULL DEFAULT true,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (workspace_id, domain)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sso_connections_domain ON sso_connections (domain);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
