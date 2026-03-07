@@ -33,8 +33,14 @@ A clear breakdown of the iterative development phases of the CustomerVoice platf
 - **Webhooks:** Send real-time updates to Slack, Discord, Jira, etc.
 - **Testing:** Base testing frameworks.
 
-## Phase 6: Real-Time & Enterprise Scale (Current Target)
+## Phase 6: Real-Time & Enterprise Scale
 - **Real-Time UX (SSE):** Make the portal "alive." Live ticking votes and comment streaming via Server-Sent Events.
 - **Embeddable Feedback Widget:** A modular JS bundle allowing B2B clients to inject CustomerVoice directly into their own SaaS apps asynchronously.
 - **User Impact / MRR Tracking:** Connect users to Stripe/Salesforce to sort ideas dynamically by "Total Revenue at Risk."
 - **Enterprise SSO & Test Automation:** Harden the Identity Layer (SAML/OIDC) and establish rigorous Playwright E2E browser tests to ensure stability.
+
+## Phase 7: Polish, Production Readiness & Billing (Current Target)
+- **Production Infrastructure:** Docker compose deployments, CI/CD pipelines, and health checks.
+- **Advanced Analytics:** Feature success metrics and usage reporting graphs.
+- **Billing & Subscriptions:** Integrate Stripe for SaaS pricing tiers.
+- **Global Search & SEO:** Implement full-text search across ideas and optimize public portals for search engines.
