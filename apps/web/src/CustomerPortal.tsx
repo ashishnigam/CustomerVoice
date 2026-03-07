@@ -1257,7 +1257,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                                     disabled={idea.status === 'declined'}
                                                     style={idea.status === 'declined' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                                                 >
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" preserveAspectRatio="xMidYMid meet" style={{ width: '40%', height: '40%' }}>
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="16" height="16">
                                                         <path d="M12 19V5M5 12l7-7 7 7" />
                                                     </svg>
                                                 </button>
@@ -1470,7 +1470,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
                                     disabled={selectedIdea.status === 'declined'}
                                     style={selectedIdea.status === 'declined' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                                 >
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" preserveAspectRatio="xMidYMid meet" style={{ width: '40%', height: '40%' }}>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18">
                                         <path d="M12 19V5M5 12l7-7 7 7" />
                                     </svg>
                                     <span>{selectedIdea.viewerHasVoted ? 'Voted' : 'Upvote'}</span>
