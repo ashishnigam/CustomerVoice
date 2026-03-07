@@ -28,7 +28,7 @@ type Board = {
   name: string;
   slug: string;
   description: string | null;
-  visibility: 'public' | 'private';
+  visibility: 'public' | 'private' | 'link_only';
   active: boolean;
 };
 
@@ -360,7 +360,7 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   const customerBoardUrl = useMemo(
     () =>
       selectedBoard
-        ? `${window.location.origin}${buildBoardPath(getShareableBoardSlug(selectedBoard.slug))}`
+        ? `${window.location.origin}/portal/boards/${getShareableBoardSlug(selectedBoard.slug)}`
         : null,
     [selectedBoard],
   );
@@ -1458,7 +1458,18 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
             >
               <span className="sidebar-icon">📋</span>
               {board.name}
-              <span className="sidebar-board-vis">{board.visibility === 'public' ? '🌐' : '🔒'}</span>
+              <span
+                className={`sidebar-board-vis ${board.visibility}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (board.visibility === 'public' || board.visibility === 'link_only') {
+                    window.open(`/portal/boards/${getShareableBoardSlug(board.slug)}`, '_blank');
+                  }
+                }}
+                title={board.visibility === 'public' ? 'Public Portal (Click to view)' : board.visibility === 'link_only' ? 'Link Only (Click to view)' : 'Private'}
+              >
+                {board.visibility === 'public' ? '🌐' : board.visibility === 'link_only' ? '🔗' : '🔒'}
+              </span>
             </button>
           ))}
         </div>

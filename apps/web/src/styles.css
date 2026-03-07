@@ -1678,6 +1678,33 @@ pre {
   color: var(--cv-subtle);
 }
 
+.sidebar-board-vis {
+  margin-left: auto;
+  font-size: 0.85rem;
+  opacity: 0.6;
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.sidebar-board-vis:hover {
+  opacity: 1;
+  filter: brightness(1.2);
+}
+
+.sidebar-board-vis.public {
+  /* Default color usually implicit, or add a slight blue tint */
+  filter: hue-rotate(180deg);
+}
+
+.sidebar-board-vis.link_only {
+  /* Orange/warning color for link only */
+  filter: sepia(100%) hue-rotate(5deg) saturate(300%);
+}
+
+.sidebar-board-vis.private {
+  /* Red color for private */
+  filter: sepia(100%) hue-rotate(-50deg) saturate(300%);
+}
+
 .detail-meta-item strong {
   font-size: 0.9rem;
 }

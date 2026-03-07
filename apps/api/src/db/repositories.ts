@@ -2771,7 +2771,7 @@ export async function createPublicIdeaComment(params: {
   let isInternal = false;
   if (params.isInternal) {
     const membershipResult = await query(
-      `SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2 AND active = TRUE LIMIT 1`,
+      `SELECT 1 FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2 AND active = TRUE LIMIT 1`,
       [params.workspaceId, params.userId]
     );
     isInternal = (membershipResult.rowCount ?? 0) > 0;
