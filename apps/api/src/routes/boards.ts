@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createBoard, findBoard, listBoards, updateBoard, workspaceExists, updateBoardSettings } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { emitAudit } from '../lib/audit.js';
+import { booleanQueryParam } from '../lib/query-schemas.js';
 import { enforceWorkspaceScope, requirePermission, type RequestWithActor } from '../middleware/auth.js';
 
 const visibilitySchema = z.enum(['public', 'private']);
@@ -53,7 +54,7 @@ const updateBoardSettingsSchema = z
   });
 
 const listQuerySchema = z.object({
-  includeInactive: z.coerce.boolean().optional(),
+  includeInactive: booleanQueryParam.optional(),
 });
 
 const createChangelogSchema = z.object({

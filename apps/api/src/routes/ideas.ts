@@ -32,6 +32,7 @@ import {
 } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import { emitAudit } from '../lib/audit.js';
+import { booleanQueryParam } from '../lib/query-schemas.js';
 import { uploadFileBuffer } from '../lib/storage.js';
 import {
   ideaModerationStateSchema,
@@ -57,8 +58,8 @@ const ideaListQuerySchema = z.object({
   status: ideaStatusSchema.optional(),
   moderationState: ideaModerationStateSchema.optional(),
   search: z.string().max(120).optional(),
-  includeInactive: z.coerce.boolean().optional(),
-  includeModerated: z.coerce.boolean().optional(),
+  includeInactive: booleanQueryParam.optional(),
+  includeModerated: booleanQueryParam.optional(),
   categoryIds: z.string().max(1200).optional(),
   sort: ideaSortSchema.optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -92,7 +93,7 @@ const updateCategorySchema = z
   });
 
 const categoryListQuerySchema = z.object({
-  includeInactive: z.coerce.boolean().optional(),
+  includeInactive: booleanQueryParam.optional(),
 });
 
 const setIdeaCategoriesSchema = z.object({

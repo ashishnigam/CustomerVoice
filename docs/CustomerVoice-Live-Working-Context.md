@@ -12,7 +12,7 @@ Core V1 thesis:
 3. Close the loop with notifications when ideas ship.
 
 ## 3. Locked business decisions
-1. Launch ICP: GoodHealth.ai and GoodWealth.ai first, while positioning for external B2B SaaS customers in parallel.
+1. Prioritization driver: external B2B SaaS commercialization first. GoodHealth.ai and GoodWealth.ai remain valuable internal references, but they are not the primary forcing function for roadmap order.
 2. Region posture: global from day 1.
 3. GTM: hybrid, with strong SEO/content for self-serve acquisition and sales-led support for larger accounts.
 4. Pricing: free beta until 50 external logos, then configurable 30-day transition before paid rollout.
@@ -22,6 +22,7 @@ Core V1 thesis:
 8. Cloud posture: stay cloud-agnostic; AWS or GCP possible, GCP is tie-breaker only if a provider-specific choice is needed.
 9. Local run target: Docker Compose.
 10. Cloud runtime target: Kubernetes.
+11. Sequencing rule: continue focusing on the current feedback product. AI workflow platform work is post-stability, post-correctness, and post-commercialization foundation.
 
 ## 4. Scope map by phase
 ### V1
@@ -91,14 +92,23 @@ Core V1 thesis:
 1. Marketing website routes at `/`, `/features`, `/pricing`, `/blog`, `/docs`, `/docs/api`, and `/docs/integrations`.
 2. Brand summary route at `/docs/brand`.
 3. Web application route at `/app` plus shareable board routes at `/app/boards/:slug`.
-4. Public portal workflows for boards, ideas, votes, comments, statuses, and category filtering.
-5. Internal moderation workflows for spam, restore, comment lock, duplicate merge, and bulk actions.
-6. Internal analytics for RICE, revenue potential, audience discovery, CSV export, and outreach enqueue.
-7. Notification worker for shipped idea emails.
-8. Mock auth and Supabase auth modes.
-9. Product UX split between board setup and customer-facing board preview.
+4. Public portal workflows for boards, ideas, votes, comments, statuses, search, sort, category filtering, roadmap, and changelog.
+5. Public-user capabilities for register/login/logout, password reset, profile read/update, follow, favorite, threaded comments, comment upvotes, and attachments.
+6. Widget mode and embeddable widget script for the public portal.
+7. Internal moderation workflows for spam, restore, comment lock, duplicate merge, internal notes, and bulk actions.
+8. Internal analytics for RICE, revenue potential, audience discovery, CSV export, outreach enqueue, and MRR-backed impact sorting.
+9. Board admin capabilities for settings, branding, access controls, changelog publishing, and webhook configuration.
+10. Notification worker for shipped idea emails and webhook dispatch.
+11. Mock auth and Supabase auth modes plus baseline SSO login/callback and SSO connection management APIs.
+12. Product UX split between board setup and customer-facing board preview.
 
 ## 9. Remaining work by phase
+### Phase 7 planning block (current)
+1. Stability and correctness gate for external commercialization.
+2. Commercial packaging candidate scope: billing, entitlements, and plan enforcement.
+3. Discovery candidate scope: stronger search, prioritization depth, and analytics depth.
+4. Final split between Phase 7 and Phase 8 is not locked yet; see `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Phase7-Planning.md`.
+
 ### V2 backlog
 1. CV-024: beta tester cohort domain model and APIs.
 2. CV-025: beta tester targeting UX and invite workflow.

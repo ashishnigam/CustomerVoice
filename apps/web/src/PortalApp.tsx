@@ -246,6 +246,29 @@ function formatRoleLabel(role: Role): string {
     .join(' ');
 }
 
+function getApiErrorCode(error: unknown): string | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const jsonMatch = error.message.match(/\{[\s\S]*\}$/);
+  if (jsonMatch) {
+    try {
+      const payload = JSON.parse(jsonMatch[0]) as { error?: unknown };
+      return typeof payload.error === 'string' ? payload.error : null;
+    } catch {
+      // Fall back to a regex parse if the error message embeds invalid JSON.
+    }
+  }
+
+  const inlineMatch = error.message.match(/"error"\s*:\s*"([^"]+)"/);
+  return inlineMatch?.[1] ?? null;
+}
+
+function isBoardNotFoundError(error: unknown): boolean {
+  return getApiErrorCode(error) === 'board_not_found';
+}
+
 export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   const [apiBase, setApiBase] = useState(defaultApiBase);
 
@@ -532,6 +555,8 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
 
         if (routeBoard) {
           setSelectedBoardId(routeBoard.id);
+        } else if (routeBoardSlug) {
+          setSelectedBoardId(null);
         } else {
           setSelectedBoardId((current) =>
             current && data.items.some((item) => item.id === current) ? current : data.items[0].id,
@@ -545,6 +570,20 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
       setBoardsLoading(false);
     }
   }, [apiRequest, routeBoardSlug, session]);
+
+  const handleMissingBoard = useCallback(
+    async (missingBoardId: string) => {
+      setBoards((current) => current.filter((board) => board.id !== missingBoardId));
+      setSelectedBoardId((current) => (current === missingBoardId ? null : current));
+      setSelectedIdeaId(null);
+      setIdeas([]);
+      setComments([]);
+      setIdeasError(null);
+      setCommentsError(null);
+      await loadBoards();
+    },
+    [loadBoards],
+  );
 
   const loadCategories = useCallback(async () => {
     if (!session) return;
@@ -582,20 +621,20 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
 
       setIdeas(data.items);
 
-      if (data.items.length === 0) {
-        setSelectedIdeaId(null);
-      } else {
-        setSelectedIdeaId((current) =>
-          current && data.items.some((item) => item.id === current) ? current : data.items[0].id,
-        );
-      }
+      setSelectedIdeaId((current) =>
+        current && data.items.some((item) => item.id === current) ? current : null,
+      );
     } catch (error) {
       if (error instanceof Error && error.message === 'unauthorized') return;
+      if (isBoardNotFoundError(error)) {
+        await handleMissingBoard(selectedBoardId);
+        return;
+      }
       setIdeasError(error instanceof Error ? error.message : 'idea_load_failed');
     } finally {
       setIdeasLoading(false);
     }
-  }, [apiRequest, ideaCategoryFilter, ideaSearch, ideaSort, ideaStatusFilter, selectedBoardId, session]);
+  }, [apiRequest, handleMissingBoard, ideaCategoryFilter, ideaSearch, ideaSort, ideaStatusFilter, selectedBoardId, session]);
 
   const loadComments = useCallback(async () => {
     if (!session || !selectedBoardId || !selectedIdeaId) {
@@ -612,11 +651,15 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
       setComments(data.items);
     } catch (error) {
       if (error instanceof Error && error.message === 'unauthorized') return;
+      if (isBoardNotFoundError(error)) {
+        await handleMissingBoard(selectedBoardId);
+        return;
+      }
       setCommentsError(error instanceof Error ? error.message : 'comment_load_failed');
     } finally {
       setCommentsLoading(false);
     }
-  }, [apiRequest, selectedBoardId, selectedIdeaId, session]);
+  }, [apiRequest, handleMissingBoard, selectedBoardId, selectedIdeaId, session]);
 
   const loadModerationIdeas = useCallback(async () => {
     if (!session || !isModerationEnabled) return;
@@ -688,6 +731,19 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   }, [routeBoardSlug]);
 
   useEffect(() => {
+    if (!routeBoardSlug) return;
+
+    // Route-driven board navigation should clear the previous board context first,
+    // otherwise the app can briefly fetch ideas/comments against a stale board ID.
+    setSelectedBoardId(null);
+    setSelectedIdeaId(null);
+    setIdeas([]);
+    setComments([]);
+    setIdeasError(null);
+    setCommentsError(null);
+  }, [routeBoardSlug]);
+
+  useEffect(() => {
     if (!routeBoardSlug || boards.length === 0) return;
 
     const matchedBoard =
@@ -710,12 +766,13 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   useEffect(() => {
     if (!selectedBoard) return;
     if (tab !== 'portal') return;
+    if (routeBoardSlug) return;
 
     const nextPath = buildBoardPath(getShareableBoardSlug(selectedBoard.slug));
     if (path !== nextPath) {
       onNavigate(nextPath);
     }
-  }, [onNavigate, path, selectedBoard, tab]);
+  }, [onNavigate, path, routeBoardSlug, selectedBoard, tab]);
 
   useEffect(() => {
     if (!session || !selectedBoardId) {

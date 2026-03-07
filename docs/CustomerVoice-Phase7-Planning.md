@@ -1,143 +1,159 @@
-# CustomerVoice Phase 7 Planning (Competitor-Gap Driven)
+# CustomerVoice Phase 7 Planning (Consolidated)
 
 Last updated: 2026-03-07
 
 ## 1. Purpose
-Define Phase 7 planning options using:
-1. Current codebase status after Phase 6 baseline.
-2. Competitor capability signals from official product/docs pages.
+This document consolidates the current Phase 7 planning discussion into a single decision surface.
 
-Roadmap source of truth remains:
-- `docs/summary.md`
-- `docs/CustomerVoice-Phases.md`
+It is designed to answer:
+1. What must happen before broader roadmap expansion.
+2. Which major workstreams are candidates for Phase 7.
+3. Which workstreams may need to move into Phase 8 instead.
 
-## 2. Current baseline (CustomerVoice)
-Implemented by code:
-- Public portal flows: ideas, votes, comments, roadmap/changelog, markdown, categories.
-- Moderation + merge + spam + comment locking.
-- SSE live updates for vote/comment events.
-- Embeddable widget script + widget mode.
-- MRR data path (`portal_users.mrr`) + impact scoring in queries.
-- Enterprise SSO route skeleton + domain-based connection lookup.
-- Playwright E2E scaffold and passing Phase 6 gate tests (`apps/e2e`).
+## 2. Strategic Direction Locked
+These planning assumptions are now locked unless explicitly changed:
+1. Focus on the current feedback product only.
+2. External SaaS commercialization drives prioritization before sister-company-specific embed work.
+3. AI workflow platform work is deferred until after stability and commercialization of the feedback product.
+4. Immediate correctness issues in auth and enterprise access UX are pre-roadmap gate work, not optional polish.
 
-Known pre-Phase-7 hardening focus:
-- Complete configuration UX + automation for enterprise controls.
-- Expand deterministic E2E and integration quality surface.
+## 3. Current Baseline (In Code)
+CustomerVoice already includes:
+- Public portal flows for ideas, votes, comments, roadmap, changelog, markdown, attachments, favorites, follows, and profile basics.
+- Moderation workflows including spam, restore, duplicate merge, comment locking, and internal-note behavior.
+- Widget mode plus embeddable widget script.
+- Internal analytics with RICE, revenue potential, audience discovery, outreach, and MRR-backed impact sorting.
+- Worker-based notification delivery and webhook dispatch.
+- SSO login/callback baseline plus SSO connection management APIs.
+- Playwright baseline coverage and DB-backed integration coverage.
 
-## 3. Competitor scan (official sources)
+## 4. Competitor-Gap Summary
 
-### 3.1 UserVoice
-- Pricing positions enterprise-first with higher ACV and integration-dependent packaging.
-- Multi-protocol SSO support (SAML, OIDC, OAuth2, JWT), including multi-provider setups.
-- Feedback portal + in-app widget + contributor-side capture + status notifications are explicitly positioned.
-- Roadmap supports stakeholder-specific views and shareable audiences.
+### 4.1 UserVoice
+Signals:
+- Enterprise pricing and strong identity packaging.
+- Mature SSO story and roadmap audience controls.
 
-### 3.2 Canny
-- Public feature surface includes board privacy, internal comments, segmentation, MRR-impact sorting, roadmap/changelog, widget.
-- Plan packaging is tiered; enterprise SSO/OIDC is Business-tier scoped.
-- Roadmap/changelog are default core concepts with board access controls.
+Implication:
+- CustomerVoice needs stronger enterprise access administration and clearer commercial packaging.
 
-### 3.3 Productboard
-- Product Portal + external sharing + feedback loop closure are central platform capabilities.
-- Pricing clearly gates advanced portal/security/integration capabilities by tier.
-- Enterprise SAML SSO and SCIM provisioning are documented as enterprise capabilities.
-- Strong Jira integration depth (auth modes, mapping, multi-integration patterns).
+### 4.2 Canny
+Signals:
+- Strong board privacy, widget, roadmap/changelog defaults, and practical segmentation/value features.
 
-### 3.4 Frill
-- Public positioning emphasizes low-friction widgets, roadmap/changelog embedding, SSO, and broad integration set.
-- Pricing is transparent and feature-tiered, with explicit add-on structure.
-- Public feature list includes duplicate detection, webhooks, segmentation, prioritization matrix, and survey modules.
+Implication:
+- CustomerVoice should strengthen access control UX, operator segmentation, and prioritization depth.
 
-## 4. Gap matrix (CustomerVoice vs market signals)
+### 4.3 Productboard
+Signals:
+- Strong portal plus enterprise security plus Jira depth.
 
-### Gap A: Enterprise identity depth
-Current:
-- SSO callback/login baseline exists.
-- SSO connection management APIs now exist.
+Implication:
+- CustomerVoice needs better commercialization and enterprise admin depth before pushing higher upmarket.
 
-Remaining gap:
-- Full IdP onboarding UX, policy controls, and SCIM-style lifecycle provisioning are not complete.
-- No hardened operator workflow for multi-IdP lifecycle and audit-ready administration.
+### 4.4 Frill
+Signals:
+- Lightweight widget and embeddable roadmap/changelog positioning with transparent packaging.
 
-### Gap B: Prioritization depth
-Current:
-- Vote, comment, and MRR impact scoring exist.
-- Added `highest_impact` sorting in public flow.
+Implication:
+- CustomerVoice should improve commercial readiness without losing low-friction portal strengths.
 
-Remaining gap:
-- No rich prioritization model editor (weighted formulas, scenario comparisons, score governance).
-- Limited segmentation/operator tooling compared with dedicated PM suites.
+## 5. Mandatory Pre-Phase Gate
+Before selecting the larger Phase 7 feature block, the following must be treated as correctness work:
+1. Auth callback flows must work end-to-end for public auth and SSO.
+2. Restricted-board access controls must be enforced consistently across public routes.
+3. Enterprise access UX must support actual configuration and usable login entry points.
+4. Validation coverage must exist for the restricted-board path.
 
-### Gap C: Search and retrieval quality
-Current:
-- Basic keyword search over ideas.
+## 6. Candidate Phase 7 Workstreams
 
-Remaining gap:
-- No full-text relevance layer, semantic retrieval, or cross-entity global search.
-
-### Gap D: Commercial packaging
-Current:
-- Pricing page content exists in marketing.
-
-Remaining gap:
-- No Stripe-backed billing, entitlements, plan enforcement, upgrade/downgrade lifecycle.
-
-### Gap E: Operator analytics
-Current:
-- Internal analytics with RICE/revenue/outreach exists.
-
-Remaining gap:
-- Limited KPI trend dashboards, cohort outcomes, portal funnel analytics, and release impact analytics.
-
-### Gap F: Reliability and QA maturity
-Current:
-- CI baseline + unit/integration + Playwright scaffold.
-- E2E port/seed alignment improved.
-
-Remaining gap:
-- Broader deterministic DB-backed suites and production-like smoke automation are still needed.
-
-## 5. Phase 7 planning options (no final priority lock yet)
-
-### Option 1: Reliability-first Phase 7
+### Workstream A: Stability And Production Readiness
 Goal:
-- Reduce delivery risk before monetization features.
+- Reduce operational risk and make the current product safer to commercialize.
 
-Scope:
-- CI hardening, deterministic DB integration setup, expanded E2E matrix, health/smoke checks, runbook automation.
+Candidate scope:
+- CI hardening.
+- More deterministic DB-backed integration coverage.
+- Expanded Playwright flows.
+- Health/smoke automation.
+- Production runbook tightening.
+- Reliability instrumentation and release confidence improvements.
 
-Output:
-- Higher confidence release cadence and lower regression risk for billing/search rollout.
+Why it matters:
+- This is the foundation for any external SaaS monetization push.
 
-### Option 2: Revenue-first Phase 7
+### Workstream B: Billing And Entitlements
 Goal:
-- Introduce monetization and entitlement controls.
+- Turn the current hosted product into something that can be sold and controlled.
 
-Scope:
-- Stripe subscriptions, workspace entitlements, plan enforcement middleware, billing lifecycle events, migration tools.
+Candidate scope:
+- Stripe subscriptions.
+- Workspace plans and entitlements.
+- Plan-aware middleware and feature gates.
+- Upgrade/downgrade lifecycle handling.
+- Billing event audit trail.
+- Migration path from free beta to paid tiers.
 
-Output:
-- Monetization readiness and controlled rollout to external tenants.
+Why it matters:
+- External SaaS commercialization is now the primary driver, so monetization readiness is no longer optional.
 
-### Option 3: Discovery-first Phase 7
+### Workstream C: Search, Prioritization, And Discovery Depth
 Goal:
-- Differentiate product decision quality.
+- Improve the quality of product decision-making beyond portal collection basics.
 
-Scope:
-- Full-text/global search, richer prioritization framework, advanced impact dashboards.
+Candidate scope:
+- Better search and retrieval.
+- Full-text/global search.
+- Richer prioritization formulas or scenario modeling.
+- Better impact dashboards.
+- Stronger operator insight surfaces.
 
-Output:
-- Stronger PM workflow positioning versus portal-only competitors.
+Why it matters:
+- This is the clearest path to differentiation against portal-only competitors.
 
-## 6. Suggested sequencing (balanced)
-1. Reliability hardening gate (short block, mandatory).
-2. Commercialization foundation (billing + entitlements).
-3. Discovery differentiation (search + advanced analytics/prioritization).
+## 7. Planning Options For Phase 7 Vs Phase 8
 
-This sequence keeps risk controlled while preserving revenue path and long-term differentiation.
+### Option 1: Phase 7 = Stability + Billing, Phase 8 = Discovery Depth
+Best when:
+- Commercial rollout speed matters most.
 
-## 7. External sources (official pages used)
+Pros:
+- Strongest path to hosted SaaS monetization.
+- Keeps sequencing disciplined.
+
+Tradeoff:
+- Product differentiation improvements wait longer.
+
+### Option 2: Phase 7 = Stability + Discovery Depth, Phase 8 = Billing
+Best when:
+- Product differentiation is more urgent than monetization readiness.
+
+Pros:
+- Stronger product story versus Canny/Frill-style alternatives.
+
+Tradeoff:
+- Commercial rollout remains structurally delayed.
+
+### Option 3: Phase 7 = Stability Only, Phase 8 = Billing + Discovery
+Best when:
+- The current product needs hardening first and the team wants a cleaner reset after that.
+
+Pros:
+- Lowest near-term execution risk.
+
+Tradeoff:
+- Slower revenue motion and slower differentiation.
+
+## 8. Recommended Decision Rule
+Regardless of the final split, Phase 7 should include:
+1. The mandatory correctness and enterprise-access gate.
+2. A non-trivial stability hardening block.
+
+After that, choose between:
+- Billing first, if commercialization urgency dominates.
+- Discovery first, if competitive differentiation dominates.
+
+## 9. External Sources Used
 - UserVoice pricing: https://uservoice.com/pricing
 - UserVoice SSO overview: https://help.uservoice.com/hc/en-us/articles/360060499314-Single-Sign-On-SSO
 - UserVoice roadmap/product page: https://www.uservoice.com/product/multiple-roadmaps

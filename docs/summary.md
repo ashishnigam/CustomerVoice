@@ -1,45 +1,63 @@
-# CustomerVoice Summary & Context
+# CustomerVoice Summary and Phase Snapshot
+
+Last updated: 2026-03-07
 
 ## Project Overview
-CustomerVoice is a modern, transparent, and highly responsive feedback portal bridging the gap between organizations and their users. It empowers companies to easily collect feature requests, prioritize ideas based on customer upvotes (and business value/MRR), share public visual roadmaps, and publish regular changelogs.
-
-The platform differentiates through a polished public portal UX, internal moderation/analytics operations, integration surfaces (webhooks/widget), and enterprise readiness tracks (SSO, governance, testing).
+CustomerVoice is a feedback and roadmap platform with:
+- Public idea intake (submit, vote, discuss)
+- Internal moderation and prioritization operations
+- Public roadmap/changelog communication
+- Enterprise controls (SSO baseline, policy configuration)
+- Notification and integration surfaces (worker + webhooks)
 
 ## Technology Stack
-- **Monorepo Strategy**: Turborepo (managing `apps/web`, `apps/api`, `apps/worker` and shared packages).
-- **Backend (`apps/api`)**: Node.js + Express + PostgreSQL with repository-layer SQL.
-- **Frontend (`apps/web`)**: React 18 + Vite + TypeScript with vanilla CSS.
-- **Background Jobs (`apps/worker`)**: Independent service handling email dispatch (Nodemailer/SMTP), notifications, and webhook forwarding.
-- **E2E (`apps/e2e`)**: Playwright browser/API flow validation.
+- Monorepo: Turborepo
+- Backend: Node.js + Express + PostgreSQL (`apps/api`)
+- Frontend: React + Vite + TypeScript (`apps/web`)
+- Worker: Node notification and webhook dispatcher (`apps/worker`)
+- E2E: Playwright (`apps/e2e`)
 
-## Current Project State
-CustomerVoice has progressed through **Phase 6** in the roadmap model defined in `docs/CustomerVoice-Phases.md`.
+## Phases 1-6 Summary
 
-Phase 6 implementation exists in code (SSE live updates, widget mode, MRR data path, SSO flow scaffolding, E2E scaffolding).  
-Current focus is a **pre-Phase-7 gate**: close remaining Phase 6 gaps/bugs and stabilize end-to-end quality before new feature expansion.
+### Phase 1: Core Portal
+- Delivered: board portal view, auth (register/login/me/logout), idea submission, voting, commenting, board access rules.
+- Status: Complete.
 
-Phase 7 planning is being prepared with competitor gap analysis and scope options, then priority selection will follow.
+### Phase 2: Enhanced UX and Retention
+- Delivered: profile updates, follow/subscription, favorites, official/team comment metadata, paginated idea browsing.
+- Status: Complete.
 
-### Gate Status Snapshot (2026-03-07)
-- Functional Phase 6 gap fixes shipped:
-  - `highest_impact` sorting in public idea listing.
-  - Internal-comment handling aligned for threaded flows (including public filtering).
-  - Board settings update coverage expanded for access/auth/visibility toggles.
-  - SSO connection management APIs added for workspace operators.
-- Validation status:
-  - ✅ `pnpm --filter @customervoice/api typecheck`
-  - ✅ `pnpm --filter @customervoice/web typecheck`
-  - ✅ `pnpm --filter @customervoice/e2e typecheck`
-  - ✅ `pnpm --filter @customervoice/api test:integration`
-  - ✅ `pnpm --filter @customervoice/e2e test:e2e`
-  - ✅ `pnpm --filter @customervoice/api test:integration:db`
-  - ✅ `pnpm --filter @customervoice/api lint`
-  - ✅ `pnpm --filter @customervoice/web lint`
+### Phase 3: Platform Excellence
+- Delivered: roadmap tab, changelog feed, threaded comments, comment upvotes, markdown rendering, branding controls.
+- Status: Complete.
 
-Pre-Phase-7 stability blockers for DB-backed integration and API/Web lint are closed.
+### Phase 4: Admin, Auth, Notifications
+- Delivered: admin board operations, changelog publishing UI, password reset flow, social auth mock flow, worker-based notifications, idea/comment attachments.
+- Status: Complete (OAuth is mock-baseline, not full provider handshake).
 
-### Key References
-- **`docs/CustomerVoice-Phases.md`**: A detailed outline of all historical and current development phases.
-- **`docs/implementation_plan.md.resolved`**: Portal enhancement plan reference (feature-level detail).
-- **`docs/CustomerVoice-Phase7-Planning.md`**: Competitor gap analysis and Phase 7 planning options.
-- **`docs/CustomerVoice-Agent-Continuity-Checklist.md`**: Immediate context when continuing active work.
+### Phase 5: Moderation and Integrations
+- Delivered: merge, spam, comments lock, bulk moderation, internal comments, webhook CRUD + dispatch, internal analytics/outreach operations.
+- Status: Complete.
+
+### Phase 6: Real-Time and Enterprise Scale
+- Delivered: SSE live updates, widget mode UX (`?widget=true`), MRR impact scoring + `highest_impact` sort, SSO login/callback baseline, SSO connection management APIs, Playwright core E2E gate.
+- Status: Complete baseline (enterprise hardening beyond baseline is post-Phase-6 work).
+
+## Current Quality Gate Snapshot
+- `@customervoice/api`: typecheck, lint, integration tests, DB integration tests passing.
+- `@customervoice/web`: typecheck and lint passing.
+- `@customervoice/e2e`: typecheck and Playwright tests passing.
+
+## Current Roadmap Position
+- Source of truth: `docs/summary.md` and `docs/CustomerVoice-Phases.md`.
+- Phases 1-6: complete baseline in code.
+- External SaaS commercialization now drives prioritization ahead of sister-company SSO/embed work.
+- AI workflow platform work is explicitly deferred until the current feedback product is more stable.
+- Immediate correctness gate before larger roadmap picks: callback auth, enterprise access UX, and restricted-board access enforcement.
+- Next planning focus: consolidated Phase 7 planning in `docs/CustomerVoice-Phase7-Planning.md`, with final Phase 7 vs Phase 8 split still open.
+
+## Key References
+- `docs/CustomerVoice-Phases.md`
+- `docs/implementation_plan.md.resolved`
+- `docs/CustomerVoice-Phase7-Planning.md`
+- `docs/CustomerVoice-Agent-Continuity-Checklist.md`

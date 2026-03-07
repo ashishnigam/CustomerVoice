@@ -25,6 +25,8 @@ type Idea = {
 type BoardSettings = {
     boardId: string;
     accessMode: 'public' | 'link_only' | 'private' | 'domain_restricted';
+    allowedDomains: string[];
+    allowedEmails: string[];
     requireAuthToVote: boolean;
     requireAuthToComment: boolean;
     requireAuthToSubmit: boolean;
@@ -67,6 +69,21 @@ function requestHeaders(params: Session): Record<string, string> {
     return headers;
 }
 
+function formatListInput(values: string[] | undefined): string {
+    return (values ?? []).join('\n');
+}
+
+function parseListInput(value: string): string[] {
+    return Array.from(
+        new Set(
+            value
+                .split(/[\n,]/)
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0),
+        ),
+    );
+}
+
 const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
 export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate: (path: string) => void }) {
@@ -99,6 +116,8 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
     const [showVoteCount, setShowVoteCount] = useState(true);
     const [portalTitle, setPortalTitle] = useState('');
     const [welcomeMessage, setWelcomeMessage] = useState('');
+    const [allowedDomainsInput, setAllowedDomainsInput] = useState('');
+    const [allowedEmailsInput, setAllowedEmailsInput] = useState('');
     const [saveBusy, setSaveBusy] = useState(false);
 
     const [changelogTitle, setChangelogTitle] = useState('');
@@ -140,6 +159,8 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                     setShowVoteCount(data.showVoteCount !== false);
                     setPortalTitle(data.portalTitle || '');
                     setWelcomeMessage(data.welcomeMessage || '');
+                    setAllowedDomainsInput(formatListInput(data.allowedDomains));
+                    setAllowedEmailsInput(formatListInput(data.allowedEmails));
                 }
             } catch (err) {
                 console.error(err);
@@ -217,6 +238,8 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                     enableIdeaSubmission,
                     enableCommenting,
                     showVoteCount,
+                    allowedDomains: parseListInput(allowedDomainsInput),
+                    allowedEmails: parseListInput(allowedEmailsInput),
                     portalTitle: portalTitle.trim() || null,
                     welcomeMessage: welcomeMessage.trim() || null,
                     headerBgColor: bgColor,
@@ -340,6 +363,34 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                                     <option value="domain_restricted">Domain Restricted</option>
                                 </select>
                             </div>
+                            {accessMode === 'domain_restricted' ? (
+                                <>
+                                    <div className="cp-form-group">
+                                        <label>Allowed Email Domains</label>
+                                        <textarea
+                                            value={allowedDomainsInput}
+                                            onChange={e => setAllowedDomainsInput(e.target.value)}
+                                            rows={4}
+                                            placeholder={'company.com\npartner.org'}
+                                        />
+                                        <small style={{ color: 'var(--cv-subtle)' }}>
+                                            One domain per line or comma-separated. Users with matching work emails can access the board.
+                                        </small>
+                                    </div>
+                                    <div className="cp-form-group">
+                                        <label>Allowed Email Addresses</label>
+                                        <textarea
+                                            value={allowedEmailsInput}
+                                            onChange={e => setAllowedEmailsInput(e.target.value)}
+                                            rows={4}
+                                            placeholder={'vip@partner.com\nadvisor@example.com'}
+                                        />
+                                        <small style={{ color: 'var(--cv-subtle)' }}>
+                                            Optional exact-email allowlist for exceptions outside the primary domain list.
+                                        </small>
+                                    </div>
+                                </>
+                            ) : null}
                             <div className="cp-form-group">
                                 <label>Portal Title</label>
                                 <input value={portalTitle} onChange={e => setPortalTitle(e.target.value)} placeholder="Customer Feedback Portal" />

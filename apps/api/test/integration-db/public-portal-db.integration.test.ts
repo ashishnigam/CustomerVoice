@@ -235,4 +235,69 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
         expect(changelogRes.body.items).toHaveLength(1);
         expect(changelogRes.body.items[0].title).toBe('Test Release');
     });
+
+    it('enforces domain-restricted access on public content routes', async () => {
+        const updateSettingsResponse = await request(app)
+            .patch(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/settings`)
+            .set(headers({ userId: ADMIN_ID, role: 'workspace_admin' }))
+            .send({
+                accessMode: 'domain_restricted',
+                allowedDomains: ['acme.corp'],
+                allowedEmails: ['vip@partner.org'],
+            });
+
+        expect(updateSettingsResponse.status).toBe(200);
+
+        const boardMetadataResponse = await request(app).get(`/api/v1/public/boards/${boardSlug}`);
+        expect(boardMetadataResponse.status).toBe(200);
+        expect(boardMetadataResponse.body._accessRestricted).toBe(true);
+        expect(boardMetadataResponse.body._accessMode).toBe('domain_restricted');
+
+        const anonymousIdeasResponse = await request(app).get(`/api/v1/public/boards/${boardSlug}/ideas`);
+        expect(anonymousIdeasResponse.status).toBe(401);
+
+        const blockedUserRegisterResponse = await request(app)
+            .post('/api/v1/public/auth/register')
+            .send({
+                email: 'outsider@other.com',
+                password: 'Password123!',
+                displayName: 'Blocked User',
+            });
+        expect(blockedUserRegisterResponse.status).toBe(201);
+
+        const blockedIdeasResponse = await request(app)
+            .get(`/api/v1/public/boards/${boardSlug}/ideas`)
+            .set('Authorization', `Bearer ${blockedUserRegisterResponse.body.token}`);
+        expect(blockedIdeasResponse.status).toBe(403);
+
+        const allowedDomainRegisterResponse = await request(app)
+            .post('/api/v1/public/auth/register')
+            .send({
+                email: 'member@acme.corp',
+                password: 'Password123!',
+                displayName: 'Allowed Domain User',
+            });
+        expect(allowedDomainRegisterResponse.status).toBe(201);
+
+        const allowedIdeasResponse = await request(app)
+            .get(`/api/v1/public/boards/${boardSlug}/ideas`)
+            .set('Authorization', `Bearer ${allowedDomainRegisterResponse.body.token}`);
+        expect(allowedIdeasResponse.status).toBe(200);
+        expect(Array.isArray(allowedIdeasResponse.body.items)).toBe(true);
+
+        const allowlistedEmailRegisterResponse = await request(app)
+            .post('/api/v1/public/auth/register')
+            .send({
+                email: 'vip@partner.org',
+                password: 'Password123!',
+                displayName: 'Allowed Email User',
+            });
+        expect(allowlistedEmailRegisterResponse.status).toBe(201);
+
+        const allowlistedCategoriesResponse = await request(app)
+            .get(`/api/v1/public/boards/${boardSlug}/categories`)
+            .set('Authorization', `Bearer ${allowlistedEmailRegisterResponse.body.token}`);
+        expect(allowlistedCategoriesResponse.status).toBe(200);
+        expect(Array.isArray(allowlistedCategoriesResponse.body.items)).toBe(true);
+    });
 });

@@ -15,11 +15,14 @@ interface Board {
     visibility: 'public' | 'private';
     _accessRestricted?: boolean;
     _accessMode?: PortalAccessMode;
+    _accessDeniedReason?: 'auth_required' | 'domain_not_allowed';
 }
 
 interface BoardSettings {
     boardId: string;
     accessMode: PortalAccessMode;
+    allowedDomains?: string[];
+    allowedEmails?: string[];
     requireAuthToVote: boolean;
     requireAuthToComment: boolean;
     requireAuthToSubmit: boolean;
@@ -121,6 +124,21 @@ interface CommentCreatePayload {
 
 /* ── Constants ── */
 const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+const portalTokenStorageKey = 'cv_portal_token';
+const portalPostAuthPathStorageKey = 'cv_portal_post_auth_path';
+
+function isAuthCallbackPath(path: string): boolean {
+    return path === '/portal/callback' || path === '/portal/auth/callback';
+}
+
+function parseSsoDomainInput(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return '';
+    if (normalized.includes('@')) {
+        return normalized.split('@').pop() ?? '';
+    }
+    return normalized.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+}
 
 function getOrCreateVisitorId(): string {
     const key = 'cv_visitor_id';
@@ -224,7 +242,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
     /* ── Auth State ── */
     const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
-    const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem('cv_portal_token'));
+    const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem(portalTokenStorageKey));
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password'>('login');
     const [authEmail, setAuthEmail] = useState('');
@@ -234,6 +252,10 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     const [authSuccess, setAuthSuccess] = useState<string | null>(null);
     const [authBusy, setAuthBusy] = useState(false);
     const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+    const [callbackStatus, setCallbackStatus] = useState<'idle' | 'processing' | 'error'>('idle');
+    const [callbackError, setCallbackError] = useState<string | null>(null);
+    const [ssoDomainInput, setSsoDomainInput] = useState('');
+    const [ssoError, setSsoError] = useState<string | null>(null);
 
     /* ── Password Reset ── */
     const [resetToken, setResetToken] = useState<string | null>(null);
@@ -244,59 +266,41 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
-        const token = params.get('reset_token');
-        if (token) {
-            setResetToken(token);
-            // Optional: remove token from URL
+        const authTokenFromCallback = params.get('token');
+        if (authTokenFromCallback) {
+            localStorage.setItem(portalTokenStorageKey, authTokenFromCallback);
+            setAuthToken(authTokenFromCallback);
+            setCallbackStatus('processing');
+            setCallbackError(null);
+            setShowAuthModal(false);
+
+            const storedPath = localStorage.getItem(portalPostAuthPathStorageKey);
+            localStorage.removeItem(portalPostAuthPathStorageKey);
+
+            const nextPath =
+                storedPath && !isAuthCallbackPath(new URL(storedPath, window.location.origin).pathname)
+                    ? storedPath
+                    : '/';
+
+            window.location.replace(nextPath);
+            return;
+        }
+
+        if (isAuthCallbackPath(path)) {
+            setCallbackStatus('error');
+            setCallbackError('Authentication callback did not include a session token.');
+            return;
+        }
+
+        setCallbackStatus('idle');
+        setCallbackError(null);
+
+        const resetTokenFromUrl = params.get('reset_token');
+        if (resetTokenFromUrl) {
+            setResetToken(resetTokenFromUrl);
             window.history.replaceState({}, document.title, window.location.pathname);
         }
-    }, []);
-
-    /* ── SSE Live Updates ── */
-    useEffect(() => {
-        if (!boardSlug) return;
-
-        const eventSource = new EventSource(`${apiBase}/public/boards/${boardSlug}/stream`);
-
-        eventSource.addEventListener('idea.voted', (event) => {
-            try {
-                const data = JSON.parse(event.data) as { ideaId: string; delta: number };
-                setIdeas((prev) =>
-                    prev.map((i) =>
-                        i.id === data.ideaId ? { ...i, voteCount: i.voteCount + data.delta } : i
-                    )
-                );
-                setSelectedIdea((prev) =>
-                    prev && prev.id === data.ideaId
-                        ? { ...prev, voteCount: prev.voteCount + data.delta }
-                        : prev
-                );
-            } catch { /* ignore */ }
-        });
-
-        eventSource.addEventListener('comment.created', (event) => {
-            try {
-                const data = JSON.parse(event.data) as { ideaId: string; comment: IdeaComment };
-                // Increment comment count, but don't duplicate if the user just posted it themselves
-                // (we already optimistically incremented it for the author). However, this might double-count 
-                // for the author unless we check if they authored it, but for simplicity, we'll let it fetch.
-                setIdeas((prev) =>
-                    prev.map((i) =>
-                        i.id === data.ideaId ? { ...i, commentCount: i.commentCount + 1 } : i
-                    )
-                );
-                setSelectedIdea((prev) =>
-                    prev && prev.id === data.ideaId
-                        ? { ...prev, commentCount: prev.commentCount + 1 }
-                        : prev
-                );
-            } catch { /* ignore */ }
-        });
-
-        return () => {
-            eventSource.close();
-        };
-    }, [boardSlug]);
+    }, [path]);
 
     /* ── Board & Data State ── */
     const [board, setBoard] = useState<Board | null>(null);
@@ -366,6 +370,59 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         return h;
     }, [visitorId, authToken]);
 
+    /* ── SSE Live Updates ── */
+    useEffect(() => {
+        if (!boardSlug || !board || board._accessRestricted) return;
+
+        const eventSource = new EventSource(`${apiBase}/public/boards/${boardSlug}/stream`);
+
+        eventSource.addEventListener('idea.voted', (event) => {
+            try {
+                const data = JSON.parse(event.data) as { ideaId: string; delta: number };
+                setIdeas((prev) =>
+                    prev.map((i) =>
+                        i.id === data.ideaId ? { ...i, voteCount: i.voteCount + data.delta } : i
+                    )
+                );
+                setSelectedIdea((prev) =>
+                    prev && prev.id === data.ideaId
+                        ? { ...prev, voteCount: prev.voteCount + data.delta }
+                        : prev
+                );
+            } catch { /* ignore */ }
+        });
+
+        eventSource.addEventListener('comment.created', (event) => {
+            try {
+                const data = JSON.parse(event.data) as { ideaId: string; comment: IdeaComment };
+                // Increment comment count, but don't duplicate if the user just posted it themselves
+                // (we already optimistically incremented it for the author). However, this might double-count
+                // for the author unless we check if they authored it, but for simplicity, we'll let it fetch.
+                setIdeas((prev) =>
+                    prev.map((i) =>
+                        i.id === data.ideaId ? { ...i, commentCount: i.commentCount + 1 } : i
+                    )
+                );
+                setSelectedIdea((prev) =>
+                    prev && prev.id === data.ideaId
+                        ? { ...prev, commentCount: prev.commentCount + 1 }
+                        : prev
+                );
+            } catch { /* ignore */ }
+        });
+
+        return () => {
+            eventSource.close();
+        };
+    }, [board, boardSlug]);
+
+    const rememberPostAuthPath = useCallback(() => {
+        localStorage.setItem(
+            portalPostAuthPathStorageKey,
+            `${window.location.pathname}${window.location.search}`,
+        );
+    }, []);
+
     /* ── Auth helpers ── */
     const requireAuth = useCallback((action: () => void) => {
         if (portalUser) {
@@ -385,8 +442,9 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                 const data = await res.json() as { user: PortalUser };
                 setPortalUser(data.user);
             } else {
-                localStorage.removeItem('cv_portal_token');
+                localStorage.removeItem(portalTokenStorageKey);
                 setAuthToken(null);
+                setPortalUser(null);
             }
         } catch { /* ignore */ }
     }, []);
@@ -472,13 +530,14 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             }
 
             const token = data.token as string;
-            localStorage.setItem('cv_portal_token', token);
+            localStorage.setItem(portalTokenStorageKey, token);
             setAuthToken(token);
             setPortalUser(data.user);
             setShowAuthModal(false);
             setAuthEmail('');
             setAuthPassword('');
             setAuthDisplayName('');
+            setSsoError(null);
 
             if (pendingAction) {
                 const action = pendingAction;
@@ -499,10 +558,24 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                 headers: { authorization: `Bearer ${authToken}` },
             }).catch(() => { /* ignore */ });
         }
-        localStorage.removeItem('cv_portal_token');
+        localStorage.removeItem(portalTokenStorageKey);
+        localStorage.removeItem(portalPostAuthPathStorageKey);
         setAuthToken(null);
         setPortalUser(null);
+        setSsoError(null);
     }, [authToken]);
+
+    const handleSsoSignIn = useCallback(() => {
+        const domain = parseSsoDomainInput(ssoDomainInput || authEmail);
+        if (!domain) {
+            setSsoError('Enter your work email or company domain to continue with SSO.');
+            return;
+        }
+
+        rememberPostAuthPath();
+        setSsoError(null);
+        window.location.href = `${apiBase}/auth/sso/login?domain=${encodeURIComponent(domain)}`;
+    }, [authEmail, rememberPostAuthPath, ssoDomainInput]);
 
     /* ── Load board & settings ── */
     const loadBoard = useCallback(async () => {
@@ -512,7 +585,9 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             if (!res.ok) throw new Error('Board not found');
             const data = await res.json() as Board;
             setBoard(data);
+            setError(null);
         } catch (err) {
+            setBoard(null);
             setError(err instanceof Error ? err.message : 'Failed to load board');
         }
     }, [boardSlug, authHeaders]);
@@ -529,7 +604,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     }, [boardSlug, authHeaders]);
 
     const loadCategories = useCallback(async () => {
-        if (!boardSlug) return;
+        if (!boardSlug || !board?.id || board._accessRestricted) return;
         try {
             const res = await fetch(`${apiBase}/public/boards/${boardSlug}/categories`, { headers: authHeaders });
             if (res.ok) {
@@ -537,10 +612,10 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                 setCategories(data.items);
             }
         } catch { /* silently fail */ }
-    }, [boardSlug, authHeaders]);
+    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders]);
 
     const loadIdeas = useCallback(async () => {
-        if (!boardSlug) return;
+        if (!boardSlug || !board?.id || board._accessRestricted) return;
         setLoading(true);
         setError(null);
         setOffset(0);
@@ -563,10 +638,10 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         } finally {
             setLoading(false);
         }
-    }, [boardSlug, authHeaders, sort, statusFilter, categoryFilter, search]);
+    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders, sort, statusFilter, categoryFilter, search]);
 
     const loadMoreIdeas = useCallback(async () => {
-        if (!boardSlug || loadingMore || !hasMore) return;
+        if (!boardSlug || !board?.id || board._accessRestricted || loadingMore || !hasMore) return;
         setLoadingMore(true);
         const nextOffset = offset + PAGE_SIZE;
         try {
@@ -587,11 +662,11 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             }
         } catch { /* ignore */ }
         finally { setLoadingMore(false); }
-    }, [boardSlug, authHeaders, sort, statusFilter, categoryFilter, search, offset, loadingMore, hasMore]);
+    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders, sort, statusFilter, categoryFilter, search, offset, loadingMore, hasMore]);
 
     /* ── Load idea detail ── */
     const loadIdeaDetail = useCallback(async (ideaId: string, viewMode: 'panel' | 'page' = 'panel') => {
-        if (!boardSlug) return;
+        if (!boardSlug || !board?.id || board._accessRestricted) return;
         setDetailLoading(true);
         setDetailViewMode(viewMode);
         try {
@@ -605,11 +680,11 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             }
         } catch { /* ignore */ }
         finally { setDetailLoading(false); }
-    }, [boardSlug, authHeaders]);
+    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders]);
 
     /* ── Load changelog ── */
     const loadChangelog = useCallback(async () => {
-        if (!boardSlug) return;
+        if (!boardSlug || !board?.id || board._accessRestricted) return;
         setChangelogLoading(true);
         try {
             const res = await fetch(`${apiBase}/public/boards/${boardSlug}/changelog`, { headers: authHeaders });
@@ -619,7 +694,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             }
         } catch { /* ignore */ }
         finally { setChangelogLoading(false); }
-    }, [boardSlug, authHeaders]);
+    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders]);
 
     /* ── Toggle follow/subscribe ── */
     const onToggleFollow = useCallback(async () => {
@@ -907,9 +982,15 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
     useEffect(() => {
         void loadBoard();
+    }, [loadBoard]);
+
+    useEffect(() => {
         void loadSettings();
+    }, [loadSettings]);
+
+    useEffect(() => {
         void loadCategories();
-    }, [loadBoard, loadSettings, loadCategories]);
+    }, [loadCategories]);
 
     useEffect(() => {
         void loadIdeas();
@@ -953,6 +1034,28 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
     const portalTitle = settings.portalTitle ?? board?.name ?? 'Feature Requests';
     const isWidget = new URLSearchParams(window.location.search).get('widget') === 'true';
+    const boardAccessMode = board?._accessMode ?? settings.accessMode;
+    const isBoardAccessRestricted = Boolean(board?._accessRestricted);
+    const isDomainRestrictedBoard = boardAccessMode === 'domain_restricted';
+    const customStyles = useMemo(() => {
+        const styles: React.CSSProperties & Record<string, string> = {};
+        if (settings.customAccentColor) {
+            styles['--cv-blue'] = settings.customAccentColor;
+            // Also derive darker/lighter variants if needed, or rely on simple override
+        }
+        return styles;
+    }, [settings.customAccentColor]);
+
+    if (isAuthCallbackPath(path)) {
+        return (
+            <div className="cp-shell">
+                <div className="cp-empty-state">
+                    <h1>{callbackStatus === 'error' ? 'Authentication Failed' : 'Signing You In'}</h1>
+                    <p>{callbackError ?? 'Completing your sign-in and returning you to the portal...'}</p>
+                </div>
+            </div>
+        );
+    }
 
     /* ── Render: No board slug ── */
     if (!boardSlug) {
@@ -978,15 +1081,82 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         );
     }
 
-    /* ── Render: Main Portal ── */
-    const customStyles = useMemo(() => {
-        const styles: React.CSSProperties & Record<string, string> = {};
-        if (settings.customAccentColor) {
-            styles['--cv-blue'] = settings.customAccentColor;
-            // Also derive darker/lighter variants if needed, or rely on simple override
-        }
-        return styles;
-    }, [settings.customAccentColor]);
+    if (board && isBoardAccessRestricted) {
+        return (
+            <div className={`cp-shell ${isWidget ? 'is-widget' : ''}`}>
+                <header className="cp-header" style={{ background: settings.headerBgColor || undefined }}>
+                    <div className="cp-header-inner">
+                        <div className="cp-header-brand">
+                            {settings.customLogoUrl ? (
+                                <img src={settings.customLogoUrl} alt="Logo" className="cp-custom-logo" />
+                            ) : (
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="28" height="28">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <path d="M8 12l2 2 4-4" />
+                                </svg>
+                            )}
+                            <div className="cp-header-title">
+                                <span className="cp-brand-name">CustomerVoice</span>
+                                <span className="cp-brand-sep">|</span>
+                                <span className="cp-board-name">{portalTitle}</span>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <div className="cp-empty-state" style={{ maxWidth: '640px', margin: '80px auto', padding: '32px' }}>
+                    <h1>{isDomainRestrictedBoard ? 'Restricted Workspace Portal' : 'Private Feedback Portal'}</h1>
+                    <p>
+                        {board._accessDeniedReason === 'domain_not_allowed'
+                            ? 'Your current account is not allowed to access this board. Sign in with an approved work account or continue with workspace SSO.'
+                            : 'This board requires authentication before you can view ideas, comments, roadmap, and changelog content.'}
+                    </p>
+                    <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap', marginTop: '24px' }}>
+                        <button
+                            className="cp-auth-submit"
+                            onClick={() => {
+                                setAuthMode('login');
+                                setShowAuthModal(true);
+                            }}
+                        >
+                            Sign In
+                        </button>
+                        {isDomainRestrictedBoard ? (
+                            <button
+                                className="hero-button ghost"
+                                onClick={() => {
+                                    setAuthMode('login');
+                                    setShowAuthModal(true);
+                                }}
+                            >
+                                Continue with SSO
+                            </button>
+                        ) : null}
+                    </div>
+                    {isDomainRestrictedBoard ? (
+                        <div style={{ marginTop: '24px', textAlign: 'left' }}>
+                            <label style={{ display: 'block', fontWeight: 600, marginBottom: '8px' }}>Work Email or Company Domain</label>
+                            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                                <input
+                                    type="text"
+                                    value={ssoDomainInput}
+                                    onChange={(e) => setSsoDomainInput(e.target.value)}
+                                    placeholder="you@company.com or company.com"
+                                    style={{ flex: 1, minWidth: '260px' }}
+                                />
+                                <button className="hero-button ghost" onClick={handleSsoSignIn}>
+                                    Start SSO
+                                </button>
+                            </div>
+                            {ssoError ? (
+                                <p className="cp-auth-error" style={{ marginTop: '12px' }}>{ssoError}</p>
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={`cp-shell ${isWidget ? 'is-widget' : ''}`} style={customStyles}>
@@ -1751,9 +1921,9 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             {/* ── Auth Modal ── */}
             {showAuthModal ? (
                 <>
-                    <div className="cp-overlay cp-modal-overlay" onClick={() => { setShowAuthModal(false); setPendingAction(null); }} />
+                    <div className="cp-overlay cp-modal-overlay" onClick={() => { setShowAuthModal(false); setPendingAction(null); setSsoError(null); }} />
                     <div className="cp-modal cp-auth-modal">
-                        <button className="cp-modal-close" onClick={() => { setShowAuthModal(false); setPendingAction(null); }}>✕</button>
+                        <button className="cp-modal-close" onClick={() => { setShowAuthModal(false); setPendingAction(null); setSsoError(null); }}>✕</button>
                         <h2>{authMode === 'register' ? 'Create Account' : authMode === 'forgot-password' ? 'Reset Password' : 'Sign In'}</h2>
                         <p className="cp-modal-subtitle">
                             {authMode === 'register'
@@ -1835,7 +2005,10 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                                     <button
                                         type="button"
                                         className="hero-button ghost"
-                                        onClick={() => window.location.href = `${apiBase}/public/auth/google`}
+                                        onClick={() => {
+                                            rememberPostAuthPath();
+                                            window.location.href = `${apiBase}/public/auth/google`;
+                                        }}
                                         style={{ width: '100%' }}
                                     >
                                         Continue with Google
@@ -1843,7 +2016,10 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                                     <button
                                         type="button"
                                         className="hero-button ghost"
-                                        onClick={() => window.location.href = `${apiBase}/public/auth/github`}
+                                        onClick={() => {
+                                            rememberPostAuthPath();
+                                            window.location.href = `${apiBase}/public/auth/github`;
+                                        }}
                                         style={{ width: '100%' }}
                                     >
                                         Continue with GitHub
@@ -1851,6 +2027,36 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                                 </div>
                             </div>
                         )}
+
+                        {authMode !== 'forgot-password' && isDomainRestrictedBoard ? (
+                            <div style={{ marginTop: '20px' }}>
+                                <div className="cp-auth-divider" style={{ display: 'flex', alignItems: 'center', textAlign: 'center', margin: '16px 0', color: 'var(--cv-subtle)', fontSize: '0.85rem' }}>
+                                    <div style={{ flex: 1, borderBottom: '1px solid var(--cv-border)' }}></div>
+                                    <span style={{ padding: '0 10px' }}>WORKSPACE SSO</span>
+                                    <div style={{ flex: 1, borderBottom: '1px solid var(--cv-border)' }}></div>
+                                </div>
+                                <div className="cp-form-group">
+                                    <label>Work Email or Company Domain</label>
+                                    <input
+                                        type="text"
+                                        value={ssoDomainInput}
+                                        onChange={(e) => setSsoDomainInput(e.target.value)}
+                                        placeholder="you@company.com or company.com"
+                                    />
+                                </div>
+                                {ssoError ? (
+                                    <div className="cp-auth-error">{ssoError}</div>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    className="hero-button ghost"
+                                    style={{ width: '100%' }}
+                                    onClick={handleSsoSignIn}
+                                >
+                                    Continue with SSO
+                                </button>
+                            </div>
+                        ) : null}
 
                         <div className="cp-auth-switch">
                             {authMode === 'login' ? (

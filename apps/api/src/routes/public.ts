@@ -127,6 +127,80 @@ async function getPortalUser(req: { header: (name: string) => string | undefined
     return findPortalUserByToken(token);
 }
 
+type PortalUserRecord = NonNullable<Awaited<ReturnType<typeof findPortalUserByToken>>>;
+type PublicBoardRecord = NonNullable<Awaited<ReturnType<typeof findBoardBySlug>>>;
+type BoardSettingsExtended = Awaited<ReturnType<typeof getBoardSettingsExtended>>;
+
+function isAllowedByDomainOrEmail(email: string, settings: BoardSettingsExtended): boolean {
+    const normalizedEmail = email.trim().toLowerCase();
+    const emailAllowed = settings.allowedEmails.some(
+        (allowedEmail) => allowedEmail.trim().toLowerCase() === normalizedEmail,
+    );
+
+    const emailDomain = normalizedEmail.split('@')[1]?.trim().toLowerCase();
+    const domainAllowed = emailDomain
+        ? settings.allowedDomains.some(
+            (allowedDomain) => allowedDomain.trim().toLowerCase() === emailDomain,
+        )
+        : false;
+
+    return emailAllowed || domainAllowed;
+}
+
+async function enforceBoardAccess(
+    req: { header: (name: string) => string | undefined },
+    res: {
+        status: (code: number) => {
+            json: (body: unknown) => void;
+        };
+    },
+    board: PublicBoardRecord,
+    options: { allowRestrictedMetadata?: boolean } = {},
+): Promise<{
+    granted: boolean;
+    portalUser: PortalUserRecord | null;
+    settings: BoardSettingsExtended;
+}> {
+    const settings = await getBoardSettingsExtended(board.id);
+    const portalUser = await getPortalUser(req);
+
+    if (settings.accessMode === 'public' || settings.accessMode === 'link_only') {
+        return { granted: true, portalUser, settings };
+    }
+
+    if (!portalUser) {
+        if (options.allowRestrictedMetadata) {
+            res.status(200).json({
+                ...board,
+                _accessRestricted: true,
+                _accessMode: settings.accessMode,
+                _accessDeniedReason: 'auth_required',
+            });
+        } else {
+            res.status(401).json({ error: 'auth_required', accessMode: settings.accessMode });
+        }
+
+        return { granted: false, portalUser: null, settings };
+    }
+
+    if (settings.accessMode === 'domain_restricted' && !isAllowedByDomainOrEmail(portalUser.email, settings)) {
+        if (options.allowRestrictedMetadata) {
+            res.status(200).json({
+                ...board,
+                _accessRestricted: true,
+                _accessMode: settings.accessMode,
+                _accessDeniedReason: 'domain_not_allowed',
+            });
+        } else {
+            res.status(403).json({ error: 'domain_not_allowed' });
+        }
+
+        return { granted: false, portalUser, settings };
+    }
+
+    return { granted: true, portalUser, settings };
+}
+
 export const publicRouter = Router();
 
 /* ── GET /public/boards/:boardSlug/stream ── */
@@ -138,6 +212,11 @@ publicRouter.get(
 
         if (!board) {
             res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
             return;
         }
 
@@ -163,28 +242,9 @@ publicRouter.get(
             return;
         }
 
-        // Get settings to check access mode
-        const settings = await getBoardSettingsExtended(board.id);
-
-        if (settings.accessMode === 'private' || settings.accessMode === 'domain_restricted') {
-            const portalUser = await getPortalUser(req);
-            if (!portalUser) {
-                // Return board info but with limited data so portal can show login
-                res.status(200).json({
-                    ...board,
-                    _accessRestricted: true,
-                    _accessMode: settings.accessMode,
-                });
-                return;
-            }
-
-            if (settings.accessMode === 'domain_restricted') {
-                const domain = portalUser.email.split('@')[1]?.toLowerCase();
-                if (!settings.allowedDomains.some((d) => d.toLowerCase() === domain)) {
-                    res.status(403).json({ error: 'domain_not_allowed' });
-                    return;
-                }
-            }
+        const access = await enforceBoardAccess(req, res, board, { allowRestrictedMetadata: true });
+        if (!access.granted) {
+            return;
         }
 
         res.status(200).json(board);
@@ -220,14 +280,18 @@ publicRouter.get(
             return;
         }
 
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
+
         const parsed = publicIdeasQuerySchema.safeParse(req.query);
         if (!parsed.success) {
             res.status(400).json({ error: 'invalid_query', details: parsed.error.flatten() });
             return;
         }
 
-        const portalUser = await getPortalUser(req);
-        const visitorId = portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.id ?? getVisitorId(req);
 
         const items = await listIdeas({
             workspaceId: board.workspaceId,
@@ -257,9 +321,13 @@ publicRouter.get(
             return;
         }
 
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
+
         const ideaId = String(req.params.ideaId);
-        const portalUser = await getPortalUser(req);
-        const visitorId = portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.id ?? getVisitorId(req);
 
         const idea = await findIdea({
             workspaceId: board.workspaceId,
@@ -281,10 +349,10 @@ publicRouter.get(
         // Enrich with subscription/favorite state if authenticated
         let isSubscribed = false;
         let isFavorited = false;
-        if (portalUser) {
+        if (access.portalUser) {
             [isSubscribed, isFavorited] = await Promise.all([
-                getIdeaSubscription({ ideaId: idea.id, userId: portalUser.id }),
-                getIdeaFavorite({ ideaId: idea.id, userId: portalUser.id }),
+                getIdeaSubscription({ ideaId: idea.id, userId: access.portalUser.id }),
+                getIdeaFavorite({ ideaId: idea.id, userId: access.portalUser.id }),
             ]);
         }
 
@@ -310,11 +378,12 @@ publicRouter.post(
             return;
         }
 
-        // Technically we should check auth settings for the board
-        const settings = await getBoardSettingsExtended(board.id);
-        const portalUser = await getPortalUser(req);
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
 
-        if (settings.requireAuthToSubmit && !portalUser) {
+        if (access.settings.requireAuthToSubmit && !access.portalUser) {
             res.status(401).json({ error: 'auth_required' });
             return;
         }
@@ -325,7 +394,7 @@ publicRouter.post(
         }
 
         const ideaId = String(req.params.ideaId);
-        const visitorId = portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.id ?? getVisitorId(req);
         const { buffer, originalname, mimetype, size } = req.file;
 
         const fileUrl = await uploadFileBuffer(
@@ -362,6 +431,11 @@ publicRouter.get(
             return;
         }
 
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
+
         const items = await listIdeaCategories({
             workspaceId: board.workspaceId,
         });
@@ -382,24 +456,26 @@ publicRouter.post(
             return;
         }
 
-        const settings = await getBoardSettingsExtended(board.id);
-        const portalUser = await getPortalUser(req);
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
 
-        if (settings.requireAuthToVote && !portalUser) {
+        if (access.settings.requireAuthToVote && !access.portalUser) {
             res.status(401).json({ error: 'auth_required', message: 'Sign in to vote' });
             return;
         }
 
         const ideaId = String(req.params.ideaId);
-        const userId = portalUser?.id ?? getVisitorId(req);
+        const userId = access.portalUser?.id ?? getVisitorId(req);
 
-        if (!portalUser) {
+        if (!access.portalUser) {
             await ensureVisitor(userId);
         } else {
             await ensureUser({
-                userId: portalUser.id,
-                email: portalUser.email,
-                displayName: portalUser.displayName ?? undefined,
+                userId: access.portalUser.id,
+                email: access.portalUser.email,
+                displayName: access.portalUser.displayName ?? undefined,
             });
         }
 
@@ -426,9 +502,13 @@ publicRouter.delete(
             return;
         }
 
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
+
         const ideaId = String(req.params.ideaId);
-        const portalUser = await getPortalUser(req);
-        const userId = portalUser?.id ?? getVisitorId(req);
+        const userId = access.portalUser?.id ?? getVisitorId(req);
 
         const vote = await unvoteIdea({
             workspaceId: board.workspaceId,
@@ -453,16 +533,17 @@ publicRouter.post(
             return;
         }
 
-        const settings = await getBoardSettingsExtended(board.id);
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
 
-        if (!settings.enableIdeaSubmission) {
+        if (!access.settings.enableIdeaSubmission) {
             res.status(403).json({ error: 'submission_disabled' });
             return;
         }
 
-        const portalUser = await getPortalUser(req);
-
-        if (settings.requireAuthToSubmit && !portalUser) {
+        if (access.settings.requireAuthToSubmit && !access.portalUser) {
             res.status(401).json({ error: 'auth_required', message: 'Sign in to submit ideas' });
             return;
         }
@@ -474,12 +555,12 @@ publicRouter.post(
         }
 
         let creatorId: string;
-        if (portalUser) {
-            creatorId = portalUser.id;
+        if (access.portalUser) {
+            creatorId = access.portalUser.id;
             await ensureUser({
-                userId: portalUser.id,
-                email: portalUser.email,
-                displayName: portalUser.displayName ?? undefined,
+                userId: access.portalUser.id,
+                email: access.portalUser.email,
+                displayName: access.portalUser.displayName ?? undefined,
             });
         } else {
             creatorId = getVisitorId(req);
@@ -511,16 +592,17 @@ publicRouter.post(
             return;
         }
 
-        const settings = await getBoardSettingsExtended(board.id);
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
 
-        if (!settings.enableCommenting) {
+        if (!access.settings.enableCommenting) {
             res.status(403).json({ error: 'commenting_disabled' });
             return;
         }
 
-        const portalUser = await getPortalUser(req);
-
-        if (settings.requireAuthToComment && !portalUser) {
+        if (access.settings.requireAuthToComment && !access.portalUser) {
             res.status(401).json({ error: 'auth_required', message: 'Sign in to comment' });
             return;
         }
@@ -535,9 +617,9 @@ publicRouter.post(
         let userId: string;
         let userEmail: string;
 
-        if (portalUser) {
-            userId = portalUser.id;
-            userEmail = portalUser.email;
+        if (access.portalUser) {
+            userId = access.portalUser.id;
+            userEmail = access.portalUser.email;
         } else {
             userId = getVisitorId(req);
             userEmail = `visitor-${userId.slice(0, 8)}@portal.customervoice.local`;
@@ -583,10 +665,12 @@ publicRouter.post(
             return;
         }
 
-        const settings = await getBoardSettingsExtended(board.id);
-        const portalUser = await getPortalUser(req);
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
 
-        if (settings.requireAuthToComment && !portalUser) {
+        if (access.settings.requireAuthToComment && !access.portalUser) {
             res.status(401).json({ error: 'auth_required' });
             return;
         }
@@ -598,7 +682,7 @@ publicRouter.post(
 
         const ideaId = String(req.params.ideaId);
         const commentId = String(req.params.commentId);
-        const visitorId = portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.id ?? getVisitorId(req);
         const { buffer, originalname, mimetype, size } = req.file;
 
         const fileUrl = await uploadFileBuffer(
@@ -723,14 +807,24 @@ publicRouter.post(
 publicRouter.post(
     '/public/boards/:boardSlug/ideas/:ideaId/subscribe',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
-            res.status(401).json({ error: 'auth_required', message: 'Sign in to follow ideas' });
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted || !access.portalUser) {
+            if (access.granted) {
+                res.status(401).json({ error: 'auth_required', message: 'Sign in to follow ideas' });
+            }
             return;
         }
 
         const ideaId = String(req.params.ideaId);
-        const result = await subscribeToIdea({ ideaId, userId: portalUser.id });
+        const result = await subscribeToIdea({ ideaId, userId: access.portalUser.id });
         res.status(200).json(result);
     }),
 );
@@ -739,14 +833,24 @@ publicRouter.post(
 publicRouter.delete(
     '/public/boards/:boardSlug/ideas/:ideaId/subscribe',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
-            res.status(401).json({ error: 'auth_required' });
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted || !access.portalUser) {
+            if (access.granted) {
+                res.status(401).json({ error: 'auth_required' });
+            }
             return;
         }
 
         const ideaId = String(req.params.ideaId);
-        await unsubscribeFromIdea({ ideaId, userId: portalUser.id });
+        await unsubscribeFromIdea({ ideaId, userId: access.portalUser.id });
         res.status(200).json({ ok: true });
     }),
 );
@@ -755,14 +859,24 @@ publicRouter.delete(
 publicRouter.post(
     '/public/boards/:boardSlug/ideas/:ideaId/favorite',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
-            res.status(401).json({ error: 'auth_required', message: 'Sign in to favorite ideas' });
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted || !access.portalUser) {
+            if (access.granted) {
+                res.status(401).json({ error: 'auth_required', message: 'Sign in to favorite ideas' });
+            }
             return;
         }
 
         const ideaId = String(req.params.ideaId);
-        const result = await favoriteIdea({ ideaId, userId: portalUser.id });
+        const result = await favoriteIdea({ ideaId, userId: access.portalUser.id });
         res.status(200).json(result);
     }),
 );
@@ -771,14 +885,24 @@ publicRouter.post(
 publicRouter.delete(
     '/public/boards/:boardSlug/ideas/:ideaId/favorite',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
-            res.status(401).json({ error: 'auth_required' });
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted || !access.portalUser) {
+            if (access.granted) {
+                res.status(401).json({ error: 'auth_required' });
+            }
             return;
         }
 
         const ideaId = String(req.params.ideaId);
-        await unfavoriteIdea({ ideaId, userId: portalUser.id });
+        await unfavoriteIdea({ ideaId, userId: access.portalUser.id });
         res.status(200).json({ ok: true });
     }),
 );
@@ -894,6 +1018,11 @@ publicRouter.get(
             return;
         }
 
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted) {
+            return;
+        }
+
         const limit = Number(req.query.limit) || 50;
         const offset = Number(req.query.offset) || 0;
 
@@ -912,14 +1041,24 @@ publicRouter.get(
 publicRouter.post(
     '/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/upvote',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
-            res.status(401).json({ error: 'auth_required' });
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted || !access.portalUser) {
+            if (access.granted) {
+                res.status(401).json({ error: 'auth_required' });
+            }
             return;
         }
 
         const commentId = String(req.params.commentId);
-        const result = await upvoteComment({ commentId, userId: portalUser.id });
+        const result = await upvoteComment({ commentId, userId: access.portalUser.id });
         res.status(200).json(result);
     })
 );
@@ -928,14 +1067,24 @@ publicRouter.post(
 publicRouter.delete(
     '/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/upvote',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
-            res.status(401).json({ error: 'auth_required' });
+        const slug = String(req.params.boardSlug);
+        const board = await findBoardBySlug({ slug, onlyPublic: false });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return;
+        }
+
+        const access = await enforceBoardAccess(req, res, board);
+        if (!access.granted || !access.portalUser) {
+            if (access.granted) {
+                res.status(401).json({ error: 'auth_required' });
+            }
             return;
         }
 
         const commentId = String(req.params.commentId);
-        const result = await removeCommentUpvote({ commentId, userId: portalUser.id });
+        const result = await removeCommentUpvote({ commentId, userId: access.portalUser.id });
         res.status(200).json(result);
     })
 );

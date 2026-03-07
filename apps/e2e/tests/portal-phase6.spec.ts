@@ -2,8 +2,60 @@ import { expect, test } from '@playwright/test';
 
 const apiBase = 'http://localhost:4000/api/v1';
 const boardSlug = 'customervoice-features';
+const boardApiPrefix = `/api/v1/public/boards/${boardSlug}`;
+
+function getPortalBootstrapRequestKey(url: string): string | null {
+  const parsed = new URL(url);
+  if (!parsed.pathname.startsWith(boardApiPrefix)) return null;
+
+  const suffix = parsed.pathname.slice(boardApiPrefix.length) || '/';
+  if (suffix === '/') return suffix;
+  if (suffix === '/settings') return suffix;
+  if (suffix === '/categories') return suffix;
+  if (suffix === '/ideas') return `${suffix}${parsed.search}`;
+  return null;
+}
+
+function serializeRequestCounts(counts: Map<string, number>): Record<string, number> {
+  return Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
 
 test.describe('Portal Phase 6 Core Flows', () => {
+  test('renders seeded portal ideas in the browser', async ({ page }) => {
+    await page.goto(`/portal/boards/${boardSlug}`);
+    await expect(page).toHaveURL(new RegExp(`/portal/boards/${boardSlug}`));
+
+    await expect(page.locator('.cp-loading')).toHaveCount(0);
+    await expect(page.locator('.cp-idea-card').first()).toBeVisible();
+    await expect(page.getByText('Dark Mode Support')).toBeVisible();
+  });
+
+  test('bootstraps portal data without repeated refetch loops', async ({ page }) => {
+    const bootstrapResponseCounts = new Map<string, number>();
+    page.on('response', (response) => {
+      const requestKey = getPortalBootstrapRequestKey(response.url());
+      if (!requestKey) return;
+      bootstrapResponseCounts.set(requestKey, (bootstrapResponseCounts.get(requestKey) ?? 0) + 1);
+    });
+
+    await page.goto(`/portal/boards/${boardSlug}`);
+    await expect(page).toHaveURL(new RegExp(`/portal/boards/${boardSlug}`));
+    await expect(page.locator('.cp-loading')).toHaveCount(0);
+    await expect(page.locator('.cp-idea-card').first()).toBeVisible();
+
+    // React StrictMode remounts once in local dev, so two bootstrap fetches are acceptable.
+    await page.waitForTimeout(300);
+    const settledCounts = serializeRequestCounts(bootstrapResponseCounts);
+
+    await page.waitForTimeout(1200);
+    expect(serializeRequestCounts(bootstrapResponseCounts)).toEqual(settledCounts);
+
+    expect(settledCounts['/'] ?? 0).toBeLessThanOrEqual(2);
+    expect(settledCounts['/settings'] ?? 0).toBeLessThanOrEqual(2);
+    expect(settledCounts['/categories'] ?? 0).toBeLessThanOrEqual(2);
+    expect(settledCounts['/ideas?sort=top_voted&limit=20&offset=0'] ?? 0).toBeLessThanOrEqual(2);
+  });
+
   test('register, submit idea, vote, and comment via public APIs', async ({ request, page }) => {
     await page.goto(`/portal/boards/${boardSlug}`);
     await expect(page).toHaveURL(new RegExp(`/portal/boards/${boardSlug}`));

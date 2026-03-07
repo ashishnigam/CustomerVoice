@@ -1,57 +1,112 @@
 # CustomerVoice Product Requirements Document (v2)
 
+Last updated: 2026-03-07
+
 ## 1. Product Vision
-CustomerVoice is a modern, transparent, and highly responsive feedback portal that bridges the gap between companies and their users. It allows organizations to collect feature requests, prioritize ideas based on customer upvotes, share visual roadmaps, and publish regular changelogs, all inside a beautifully branded interface.
+CustomerVoice is a multi-tenant feedback and roadmap platform for B2B software teams. The product is designed to collect customer demand in a public portal, help product teams moderate and prioritize that demand internally, and close the loop through roadmap visibility, changelog publishing, and outbound notifications.
 
-## 2. Completed Features (Current State)
+Current product focus is the feedback platform itself. AI workflow orchestration remains part of the longer-term company vision, but it is intentionally deferred until the current feedback product is more stable and commercially ready.
 
-### Phase 1: Core Portal
-- **Public View:** Clean, accessible portal displaying a list of submitted ideas.
-- **Authentication:** Email/Password registration and login with session management.
-- **Engagement:** Users can submit new ideas, vote on existing ones, and leave comments.
-- **Access Control:** Boards can be public, private, or link-only, governed by robust database settings.
+## 2. Product Positioning (Current)
+CustomerVoice currently competes as a modern feedback operations product in the same broad category as UserVoice, Canny, Frill, and Productboard portal workflows.
 
-### Phase 2: Enhanced UX & Retention
-- **User Profiles:** Users can update their display names and avatars.
-- **Subscriptions:** Users can "Follow" ideas to receive updates.
-- **Official Responses:** Staff comments have a distinct UI (badges/highlights) to show official alignment.
-- **Pagination & Performance:** Infinite scroll implementation for high-volume idea boards.
+Positioning emphasis:
+- Transparent public intake: ideas, votes, comments, roadmap, changelog.
+- Internal operator leverage: moderation, dedupe, scoring, outreach, and analytics.
+- Enterprise baseline: SSO connection APIs, policy controls, auditability, widget support, and white-label foundation.
+- External SaaS commercialization first: roadmap priority is driven by hosted SaaS readiness before sister-company-specific embed or AI workflow expansion.
 
-### Phase 3: Platform Excellence
-- **Public Roadmap:** Kanban-style visualization of ideas based on their status (Planned, Building, Completed).
-- **Changelog:** A dedicated "What's New" timeline view for published updates and release notes.
-- **Threaded Comments:** Support for nested replies and comment upvoting to foster richer discussions.
-- **Markdown Support:** React-Markdown and remark-gfm allow formatting in idea descriptions and comments.
-- **Custom Branding:** Board settings reflect custom accent colors, logos, and header backgrounds dynamically.
+## 3. Shipped Product Scope (Actual Current State)
 
-### Phase 4: Admin, Auth & Notifications
-- **Admin Dashboard:** Internal UI (`/admin`) to configure board settings, update statuses, and draft Changelogs with a rich text editor.
-- **Social Auth:** Fully implemented Google and GitHub OAuth callbacks issuing JWTs.
-- **Background Worker:** A polling worker in `apps/worker` dispatches emails (e.g., Password Reset, Notifications) using Nodemailer/SMTP.
-- **File Attachments:** Natively upload screenshots and documentation to ideas and comments via multipart form data to AWS S3 / Minio.
+### 3.1 Public Portal
+- Board portal by slug under `/portal/boards/:slug`.
+- Idea submission, voting, commenting, status visibility, search, sort, and category filtering.
+- Roadmap tab and changelog tab.
+- Threaded comments, comment upvotes, markdown rendering, and attachments.
+- User account flows: register, login, logout, `me`, forgot password, reset password.
+- Profile update, favorites, follows/subscriptions, and deep-linked idea detail views.
+- Widget mode (`?widget=true`) plus embeddable widget script.
+- SSE live updates for vote and comment activity.
+- Board access modes including public, private, link-only, and domain-restricted.
 
-## 3. Architecture Overview
+### 3.2 Internal Product Operations
+- Internal workspace shell under `/app`.
+- Board creation and board route management.
+- Category creation and management.
+- Idea status management and portal preview.
+- Moderation queue for spam, restore, comment lock/unlock, duplicate merge, and bulk actions.
+- Internal analytics for RICE, revenue potential, audience contact discovery, CSV export, and outreach enqueue.
+- MRR-backed impact scoring and `highest_impact` sorting support.
 
-### Monorepo Structure
-The project uses Turborepo for workspace management.
-- `apps/api` (Backend): Node.js, Fastify, Drizzle ORM, connected to PostgreSQL. Contains all business logic in `routes/` and data access in `db/repositories.ts`.
-- `apps/web` (Frontend): React 18, Vite. All UI is built using vanilla CSS (`styles.css`) focusing on a glassmorphic aesthetic.
-- `apps/mobile` (Mobile): Placeholder for future mobile applications.
-- `apps/worker` (Background jobs): Placeholder for email/notification queues.
-- `packages/types`: Shared TypeScript interfaces between API and Web.
-- `packages/ui` & `packages/config`: Shared configurations and components.
+### 3.3 Board Administration
+- Board-scoped admin surface under `/admin/boards/:slug`.
+- Portal branding controls: logo, accent color, header color, title, welcome copy, powered-by toggle.
+- Access controls: board access mode, auth requirements, and domain/email allowlists for restricted boards.
+- Changelog publishing UI with markdown editor.
+- Webhook CRUD UI and delivery configuration.
 
-### API & Versioning
-- All public-facing routes are prefixed with `/api/v1/public/`.
-- Routes are validated using JSON Schema (TypeBox/Zod integration).
-- Authentication uses bearer JWTs or secure session tokens.
+### 3.4 Platform Services
+- Worker-driven email notification processing.
+- Webhook dispatch from worker jobs.
+- Workspace membership APIs and RBAC enforcement.
+- Audit event persistence.
+- Mock auth mode and Supabase JWT validation path.
+- Baseline SSO login/callback flow and SSO connection management APIs.
+- Playwright E2E baseline and DB-backed integration coverage.
 
-## 4. Future Backlog (Phase 5: Moderation & Integrations)
-- **Idea Merging (Priority):** Admin ability to merge duplicate ideas to consolidate votes and followers.
-- **Internal Comments (Priority):** Staff-only notes on public ideas that customers cannot see.
-- **Webhooks & External Integrations:** Send updates to Slack, Discord, Jira, or Linear. Support bidirectional status syncs.
-- **Embeddable Widget:** A lightweight React script that can be embedded securely on any customer website to open a feedback modal without leaving the host application.
-- **Real-time UX:** Implement Server-Sent Events (SSE) or WebSockets so the board vote counters and comments feel alive and auto-refresh.
-- **User Impact / MRR Tracking:** Connect users to Stripe or Salesforce IDs to weigh votes by Total Revenue at Risk.
-- **Enterprise SSO:** Support SAML or OIDC for corporate identity providers.
-- **Automated E2E Testing Suite:** Prevent UI regressions using Playwright or Cypress workflows against the public portal.
+## 4. Actual Architecture Overview
+
+### 4.1 Monorepo Structure
+- `apps/api`: Node.js + Express + TypeScript + PostgreSQL.
+- `apps/web`: React + Vite + TypeScript.
+- `apps/worker`: Node.js + TypeScript notification and webhook dispatcher.
+- `apps/mobile`: React Native shell placeholder.
+- `apps/e2e`: Playwright test project.
+- `packages/*`: shared package stubs and shared types/config.
+
+### 4.2 Implementation Notes
+- Public routes are served from `/api/v1/public/*`.
+- Authenticated workspace routes are served from `/api/v1/workspaces/:workspaceId/*`.
+- Validation is primarily Zod-based in the API route layer.
+- Persistence currently centers on repository functions in `apps/api/src/db/repositories.ts`.
+- Local infrastructure uses Docker Compose with Postgres, Redis, MailHog, and MinIO.
+
+## 5. Current Product Boundaries
+
+### 5.1 Included Now
+- Feedback portal and internal moderation/prioritization product.
+- Public roadmap and changelog communication loop.
+- Operator analytics and outreach workflows.
+- Enterprise baseline features needed for hosted SaaS evolution.
+
+### 5.2 Explicitly Not Complete Yet
+- Stripe billing, plan entitlements, and commercial enforcement.
+- Full-text or semantic search beyond current keyword search.
+- Rich prioritization model editor beyond current RICE/revenue/MRR signals.
+- Full enterprise identity hardening such as multi-IdP lifecycle admin and SCIM-like provisioning.
+- Full white-label package including custom domains and branded email delivery.
+- GoodHealth.ai and GoodWealth.ai embed-specific productization.
+- AI workflow pipeline for PRD/design/dev/test/release orchestration.
+
+## 6. Roadmap Position
+
+### 6.1 Immediate Priority
+Before larger roadmap expansion, CustomerVoice should continue hardening the current feedback product for external SaaS commercialization. Immediate correctness work includes auth callback handling, restricted-board enforcement, and enterprise access UX.
+
+### 6.2 Phase 7 Candidate Scope
+Phase 7 is now treated as a consolidated planning bucket with three candidate workstreams:
+1. Stability and production-readiness hardening.
+2. Billing, entitlements, and commercialization controls.
+3. Search, prioritization, and operator analytics depth.
+
+The exact split between Phase 7 and Phase 8 is still open.
+
+### 6.3 Deferred Strategic Work
+AI workflow orchestration remains strategically important, but it is not the current implementation target. It should resume only after the feedback product has stronger stability, enterprise correctness, and commercialization foundations.
+
+## 7. Success Criteria For The Current Product Stage
+- Hosted SaaS onboarding feels coherent for external customers.
+- Restricted boards and enterprise access controls behave correctly end-to-end.
+- Moderation and prioritization workflows support manual customer-facing operations without obvious gaps.
+- The roadmap/changelog/notification loop works reliably enough for beta-to-paid transition planning.
+- Documentation accurately reflects shipped behavior and near-term roadmap decisions.

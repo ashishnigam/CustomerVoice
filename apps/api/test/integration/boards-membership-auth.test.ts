@@ -206,6 +206,22 @@ describe('boards + membership + portal parity auth flow (integration)', () => {
     });
   });
 
+  it('parses includeInactive=false query string as false for board listing', async () => {
+    const { createApp } = await import('../../src/app.js');
+    const app = createApp();
+
+    const response = await request(app)
+      .get('/api/v1/workspaces/ws-1/boards')
+      .query({ includeInactive: 'false' })
+      .set(authHeaders({ role: 'viewer' }));
+
+    expect(response.status).toBe(200);
+    expect(repositoryMock.listBoards).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      includeInactive: false,
+    });
+  });
+
   it('creates board for workspace_admin and writes audit event', async () => {
     repositoryMock.createBoard.mockResolvedValue({
       id: 'board-2',
@@ -391,6 +407,34 @@ describe('boards + membership + portal parity auth flow (integration)', () => {
       includeModerated: undefined,
       categoryIds: ['cat-1'],
       sort: 'most_commented',
+      limit: undefined,
+      viewerId: 'user-1',
+    });
+  });
+
+  it('parses includeInactive and includeModerated false query strings for idea listing', async () => {
+    const { createApp } = await import('../../src/app.js');
+    const app = createApp();
+
+    const response = await request(app)
+      .get('/api/v1/workspaces/ws-1/boards/board-1/ideas')
+      .query({
+        includeInactive: 'false',
+        includeModerated: 'false',
+      })
+      .set(authHeaders({ role: 'viewer' }));
+
+    expect(response.status).toBe(200);
+    expect(repositoryMock.listIdeas).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      boardId: 'board-1',
+      status: undefined,
+      moderationState: undefined,
+      search: undefined,
+      includeInactive: false,
+      includeModerated: false,
+      categoryIds: undefined,
+      sort: undefined,
       limit: undefined,
       viewerId: 'user-1',
     });
