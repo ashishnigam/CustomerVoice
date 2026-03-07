@@ -113,6 +113,12 @@ interface CustomerPortalProps {
     onNavigate: (path: string) => void;
 }
 
+interface CommentCreatePayload {
+    body: string;
+    isInternal: boolean;
+    parentCommentId?: string;
+}
+
 /* ── Constants ── */
 const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -211,7 +217,7 @@ const defaultSettings: BoardSettings = {
 };
 
 /* ── Component ── */
-export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.Element {
+export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     const visitorId = useMemo(() => getOrCreateVisitorId(), []);
     const boardSlug = useMemo(() => getSlugFromPath(path), [path]);
     const deepLinkIdeaId = useMemo(() => getIdeaIdFromPath(path), [path]);
@@ -702,7 +708,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
             setCommentBusy(true);
             try {
                 const bodyToSubmit = commentBody.trim();
-                const payload: any = { body: bodyToSubmit, isInternal };
+                const payload: CommentCreatePayload = { body: bodyToSubmit, isInternal };
                 if (replyingTo) payload.parentCommentId = replyingTo.id;
 
                 // NOTE: The instruction provided a different URL and auth scheme.

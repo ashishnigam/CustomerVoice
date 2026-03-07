@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests --exclude test/integration-db/**",
     "test:integration": "vitest run --passWithNoTests --dir test/integration",
-    "test:integration:db": "vitest run --dir test/integration-db",
+    "test:integration:db": "vitest run --pool=forks --poolOptions.forks.singleFork --dir test/integration-db",
     "test:e2e": "echo 'api e2e tests not scaffolded yet'"
   },
   "dependencies": {

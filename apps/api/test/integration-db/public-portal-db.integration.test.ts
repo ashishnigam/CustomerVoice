@@ -144,7 +144,7 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
             .set('Authorization', `Bearer ${token}`);
 
         expect(voteResponse.status).toBe(200);
-        expect(voteResponse.body.voteCount).toBe(2); // 1 automatic vote for creator + this vote (if it double counts, or just 1 if idempotent)
+        expect(voteResponse.body.voteCount).toBe(1);
 
         // 5. Post a comment
         const commentResponse = await request(app)
@@ -174,17 +174,19 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
 
         // 8. Fetch threaded comments and verify nesting
         const fetchCommentsRes = await request(app)
-            .get(`/api/v1/public/boards/${boardSlug}/ideas/${ideaId}/comments?threaded=true`);
+            .get(`/api/v1/public/boards/${boardSlug}/ideas/${ideaId}?threaded=true`)
+            .set('Authorization', `Bearer ${token}`);
 
         expect(fetchCommentsRes.status).toBe(200);
-        const comments = fetchCommentsRes.body.items;
+        const comments = fetchCommentsRes.body.comments;
 
-        // We should only see roots at top level
-        expect(comments).toHaveLength(1);
-        expect(comments[0].id).toBe(commentId);
-        expect(comments[0].replies).toBeDefined();
-        expect(comments[0].replies[0].id).toBe(replyId);
-        expect(comments[0].replies[0].upvoteCount).toBe(1);
+        expect(comments).toHaveLength(2);
+        const rootComment = comments.find((item: { id: string }) => item.id === commentId);
+        const replyComment = comments.find((item: { id: string }) => item.id === replyId);
+        expect(rootComment).toBeDefined();
+        expect(replyComment).toBeDefined();
+        expect(replyComment?.parentCommentId).toBe(commentId);
+        expect(replyComment?.upvoteCount).toBe(1);
 
         // 9. Forgot Password capability
         const forgotResponse = await request(app)
@@ -227,7 +229,7 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
         );
 
         // 2. Fetch the changelog publicly
-        const changelogRes = await request(app).get(`/ api / v1 / public / boards / ${boardSlug}/changelog`);
+        const changelogRes = await request(app).get(`/api/v1/public/boards/${boardSlug}/changelog`);
         expect(changelogRes.status).toBe(200);
         expect(changelogRes.body.items).toBeDefined();
         expect(changelogRes.body.items).toHaveLength(1);

@@ -28,8 +28,8 @@ Roadmap source of truth is:
   - [x] `docs/summary.md`
   - [x] `apps/web/src/MarketingSite.tsx` docs messaging
   - [x] This continuity checklist
-- [ ] DB-backed integration suite stabilized (`pnpm --filter @customervoice/api test:integration:db` currently failing).
-- [ ] API/Web lint baseline cleaned (`pnpm --filter @customervoice/api lint`, `pnpm --filter @customervoice/web lint` currently failing).
+- [x] DB-backed integration suite stabilized (`pnpm --filter @customervoice/api test:integration:db` passing in single-fork mode).
+- [x] API/Web lint baseline cleaned (`pnpm --filter @customervoice/api lint`, `pnpm --filter @customervoice/web lint` passing).
 
 ## Phase 7 planning preparation
 - [x] Build competitor gap analysis (UserVoice, Canny, Productboard, Frill) from current public feature surfaces.

@@ -32,10 +32,11 @@ Phase 7 planning is being prepared with competitor gap analysis and scope option
   - ✅ `pnpm --filter @customervoice/e2e typecheck`
   - ✅ `pnpm --filter @customervoice/api test:integration`
   - ✅ `pnpm --filter @customervoice/e2e test:e2e`
-  - ❌ `pnpm --filter @customervoice/api test:integration:db` (deadlock, duplicate seed key, merge-flow 500 in existing DB suite)
-  - ❌ API/Web lint still have unresolved pre-existing errors
+  - ✅ `pnpm --filter @customervoice/api test:integration:db`
+  - ✅ `pnpm --filter @customervoice/api lint`
+  - ✅ `pnpm --filter @customervoice/web lint`
 
-Open pre-Phase-7 blockers are DB-backed integration suite stability and lint baseline cleanup.
+Pre-Phase-7 stability blockers for DB-backed integration and API/Web lint are closed.
 
 ### Key References
 - **`docs/CustomerVoice-Phases.md`**: A detailed outline of all historical and current development phases.

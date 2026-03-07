@@ -1580,7 +1580,7 @@ export async function mergeIdeas(params: {
         SELECT workspace_id, $2, user_id
         FROM idea_votes
         WHERE workspace_id = $1 AND idea_id = $3
-        ON CONFLICT (workspace_id, idea_id, user_id) DO NOTHING
+        ON CONFLICT (idea_id, user_id) DO NOTHING
       `,
       [params.workspaceId, params.targetIdeaId, params.sourceIdeaId],
     );
@@ -1605,7 +1605,7 @@ export async function mergeIdeas(params: {
         SELECT workspace_id, $2, category_id
         FROM idea_category_links
         WHERE workspace_id = $1 AND idea_id = $3
-        ON CONFLICT (workspace_id, idea_id, category_id) DO NOTHING
+        ON CONFLICT (idea_id, category_id) DO NOTHING
       `,
       [params.workspaceId, params.targetIdeaId, params.sourceIdeaId],
     );
@@ -1630,10 +1630,8 @@ export async function mergeIdeas(params: {
         UPDATE ideas
         SET
           moderation_state = 'merged',
-          merged_into_id = $3,
+          merged_into_idea_id = $3,
           comments_locked = TRUE,
-          vote_count = 0,
-          comment_count = 0,
           active = FALSE,
           updated_by = $4,
           updated_at = NOW()
@@ -1647,15 +1645,7 @@ export async function mergeIdeas(params: {
         UPDATE ideas
         SET 
           updated_by = $3, 
-          updated_at = NOW(),
-          vote_count = (
-            SELECT COUNT(*)::int FROM idea_votes
-            WHERE workspace_id = $1 AND idea_id = $2
-          ),
-          comment_count = (
-            SELECT COUNT(*)::int FROM idea_comments
-            WHERE workspace_id = $1 AND idea_id = $2 AND active = TRUE
-          )
+          updated_at = NOW()
         WHERE workspace_id = $1 AND id = $2
       `,
       [params.workspaceId, params.targetIdeaId, params.updatedBy],
@@ -3727,7 +3717,7 @@ export async function listCommentAttachments(params: {
   }));
 }
 
-function mapWebhook(row: any): WebhookRecord {
+function mapWebhook(row: WebhookRow): WebhookRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -3749,7 +3739,7 @@ export async function createWebhook(params: {
   const id = uuidv4();
   const active = params.active ?? true;
 
-  const result = await query(
+  const result = await query<WebhookRow>(
     `
       INSERT INTO webhooks (id, workspace_id, url, events, secret, active)
       VALUES ($1, $2, $3, $4, $5, $6)
@@ -3762,7 +3752,7 @@ export async function createWebhook(params: {
 }
 
 export async function listWebhooks(workspaceId: string): Promise<WebhookRecord[]> {
-  const result = await query(
+  const result = await query<WebhookRow>(
     `
       SELECT * FROM webhooks
       WHERE workspace_id = $1
@@ -3785,7 +3775,7 @@ export async function updateWebhook(
   }
 ): Promise<WebhookRecord | null> {
   const parts: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramIdx = 1;
 
   if (params.url !== undefined) {
@@ -3819,7 +3809,7 @@ export async function updateWebhook(
     RETURNING *
   `;
 
-  const result = await query(sql, values);
+  const result = await query<WebhookRow>(sql, values);
   return result.rows.length ? mapWebhook(result.rows[0]) : null;
 }
 
@@ -3836,7 +3826,7 @@ export async function deleteWebhook(id: string, workspaceId: string): Promise<bo
 }
 
 export async function getActiveWebhooksForEvent(workspaceId: string, event: string): Promise<WebhookRecord[]> {
-  const result = await query(
+  const result = await query<WebhookRow>(
     `
       SELECT * FROM webhooks
       WHERE workspace_id = $1

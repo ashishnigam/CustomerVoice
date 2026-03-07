@@ -259,7 +259,7 @@ describe('db-backed integration: portal parity v1 flows', () => {
         targetIdeaId,
       });
 
-    expect(mergeResponse.status).toBe(200);
+    expect(mergeResponse.status, JSON.stringify(mergeResponse.body)).toBe(200);
     expect(mergeResponse.body.source.moderationState).toBe('merged');
     expect(mergeResponse.body.target.id).toBe(targetIdeaId);
 

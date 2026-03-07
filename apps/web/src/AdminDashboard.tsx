@@ -12,6 +12,7 @@ type Session = {
 };
 
 type IdeaStatus = 'new' | 'under_review' | 'accepted' | 'planned' | 'in_progress' | 'completed' | 'declined';
+type ChangelogEntryType = 'feature' | 'improvement' | 'bugfix';
 
 type Idea = {
     id: string;
@@ -38,6 +39,14 @@ type BoardSettings = {
     customCss: string | null;
     fontFamily: string | null;
     hidePoweredBy: boolean;
+};
+
+type Webhook = {
+    id: string;
+    url: string;
+    events: string[];
+    secret: string;
+    active: boolean;
 };
 
 const defaultWorkspaceId = '22222222-2222-2222-2222-222222222222';
@@ -72,13 +81,10 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
     const [workspaceIdFn, setWorkspaceIdFn] = useState(defaultWorkspaceId);
     const [userIdFn, setUserIdFn] = useState(defaultUserId);
     const [userEmailFn, setUserEmailFn] = useState(defaultUserEmail);
-    const [accessTokenFn, setAccessTokenFn] = useState('');
+    const [accessTokenFn] = useState('');
 
     const [boardId, setBoardId] = useState<string | null>(null);
-    const [settings, setSettings] = useState<BoardSettings | null>(null);
     const [ideas, setIdeas] = useState<Idea[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
     const [bgColor, setBgColor] = useState('#ffffff');
     const [accentColor, setAccentColor] = useState('#000000');
@@ -97,7 +103,7 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
 
     const [changelogTitle, setChangelogTitle] = useState('');
     const [changelogBody, setChangelogBody] = useState('');
-    const [changelogType, setChangelogType] = useState<'feature' | 'improvement' | 'bugfix'>('feature');
+    const [changelogType, setChangelogType] = useState<ChangelogEntryType>('feature');
     const [changelogBusy, setChangelogBusy] = useState(false);
 
     const [mergeModalOpen, setMergeModalOpen] = useState(false);
@@ -105,7 +111,7 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
     const [mergeTargetId, setMergeTargetId] = useState('');
     const [mergeBusy, setMergeBusy] = useState(false);
 
-    const [webhooks, setWebhooks] = useState<any[]>([]);
+    const [webhooks, setWebhooks] = useState<Webhook[]>([]);
     const [webhookUrl, setWebhookUrl] = useState('');
     const [webhookSecret, setWebhookSecret] = useState('');
     const [webhookEventsIdeaCreated, setWebhookEventsIdeaCreated] = useState(true);
@@ -119,9 +125,8 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
             try {
                 const res = await fetch(`${apiBase}/public/boards/${boardSlug}/settings`);
                 if (res.ok) {
-                    const data = await res.json();
+                    const data = await res.json() as BoardSettings;
                     setBoardId(data.boardId);
-                    setSettings(data);
                     setBgColor(data.headerBgColor || '#ffffff');
                     setAccentColor(data.customAccentColor || '#000000');
                     setLogoUrl(data.customLogoUrl || '');
@@ -500,7 +505,7 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                             </div>
                             <div className="cp-form-group">
                                 <label>Entry Type</label>
-                                <select value={changelogType} onChange={e => setChangelogType(e.target.value as any)} style={{ padding: '10px' }}>
+                                <select value={changelogType} onChange={e => setChangelogType(e.target.value as ChangelogEntryType)} style={{ padding: '10px' }}>
                                     <option value="feature">Feature</option>
                                     <option value="improvement">Improvement</option>
                                     <option value="bugfix">Bugfix</option>

@@ -30,7 +30,7 @@ export function addClient(boardId: string, res: Response) {
     });
 }
 
-export function broadcast(boardId: string, event: string, data: any) {
+export function broadcast(boardId: string, event: string, data: unknown) {
     const boardClients = clients.get(boardId);
     if (!boardClients) return;
 

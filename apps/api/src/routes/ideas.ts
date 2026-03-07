@@ -642,8 +642,11 @@ ideasRouter.post(
       });
 
       res.status(200).json(result);
-    } catch (e: any) {
-      if (e.message === 'merge_target_must_differ' || e.message === 'merge_requires_same_board') {
+    } catch (e: unknown) {
+      if (
+        e instanceof Error &&
+        (e.message === 'merge_target_must_differ' || e.message === 'merge_requires_same_board')
+      ) {
         res.status(400).json({ error: e.message });
         return;
       }
