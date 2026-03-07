@@ -3096,6 +3096,12 @@ h4 {
   animation: fadeInUp 0.4s var(--cv-ease) both;
 }
 
+/* Ensure the share dropdown overlaps sibling cards */
+.cp-idea-card:has(.cp-share-dropdown) {
+  z-index: 100;
+  position: relative;
+}
+
 .cp-idea-card:hover {
   border-color: rgba(42, 120, 183, 0.2);
   box-shadow: var(--cv-shadow);
@@ -3825,11 +3831,11 @@ h4 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  color: var(--cv-subtle);
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--cv-border-strong);
+  background: var(--cv-surface-solid);
+  color: var(--cv-ink-3);
   cursor: pointer;
   border-radius: var(--cv-radius-sm);
   transition: all 0.15s var(--cv-ease);
