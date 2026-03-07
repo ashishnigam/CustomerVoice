@@ -91,18 +91,19 @@ Positioning emphasis:
 ## 6. Roadmap Position
 
 ### 6.1 Immediate Priority
-Before larger roadmap expansion, CustomerVoice should continue hardening the current feedback product for external SaaS commercialization. Immediate correctness work includes auth callback handling, restricted-board enforcement, and enterprise access UX.
+Before broader roadmap expansion, CustomerVoice should complete the Phase 7 tenant hardening track. Immediate correctness work includes auth callback handling, restricted-board enforcement, and enterprise access UX because those now sit inside the tenant-hardening program rather than beside it.
 
-### 6.2 Phase 7 Candidate Scope
-Phase 7 is now treated as a consolidated planning bucket with three candidate workstreams:
-1. Stability and production-readiness hardening.
-2. Billing, entitlements, and commercialization controls.
-3. Search, prioritization, and operator analytics depth.
+### 6.2 Phase 7 Locked Scope
+Phase 7 is now locked to one execution track:
+1. True multi-tenant foundation with enterprise-domain tenant resolution.
+2. Personal-tenant handling for public email providers.
+3. Tenant-aware auth, sessions, SSO resolution, board routing, and access enforcement.
+4. Additive schema migration, backfill, cutover, and regression coverage for the tenant boundary.
 
-The exact split between Phase 7 and Phase 8 is still open.
+All previously discussed Phase 7 feature work outside tenancy now moves to Phase 8, including billing, entitlements, search, prioritization depth, advanced analytics, and broader commercialization polish.
 
 ### 6.3 Deferred Strategic Work
-AI workflow orchestration remains strategically important, but it is not the current implementation target. It should resume only after the feedback product has stronger stability, enterprise correctness, and commercialization foundations.
+AI workflow orchestration remains strategically important, but it is not part of the Phase 7 tenant-hardening track. It now sits inside the broader Phase 8 expansion bucket and should resume only after the tenant foundation is complete.
 
 ## 7. Success Criteria For The Current Product Stage
 - Hosted SaaS onboarding feels coherent for external customers.

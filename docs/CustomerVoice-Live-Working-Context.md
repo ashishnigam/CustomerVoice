@@ -103,13 +103,13 @@ Core V1 thesis:
 12. Product UX split between board setup and customer-facing board preview.
 
 ## 9. Remaining work by phase
-### Phase 7 planning block (current)
-1. Stability and correctness gate for external commercialization.
-2. Commercial packaging candidate scope: billing, entitlements, and plan enforcement.
-3. Discovery candidate scope: stronger search, prioritization depth, and analytics depth.
-4. Final split between Phase 7 and Phase 8 is not locked yet; see `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Phase7-Planning.md`.
+### Phase 7 planning block (locked)
+1. Phase 7 is now the true multi-tenant foundation phase.
+2. Scope includes enterprise-domain tenant resolution, personal tenants for public-email users, tenant-aware auth/session handling, tenant-aware public routing, SSO/domain administration, and migration/cutover.
+3. Correctness fixes for restricted boards, auth callbacks, and enterprise access UX are included because they are part of the tenant-hardening path.
+4. All previously discussed non-tenancy feature work moves to Phase 8; see `/Users/ashishnigam/Startups/CustomerVoice/docs/CustomerVoice-Phase7-Planning.md`.
 
-### V2 backlog
+### Phase 8 backlog
 1. CV-024: beta tester cohort domain model and APIs.
 2. CV-025: beta tester targeting UX and invite workflow.
 3. CV-026: white-label v2 backend for custom domain and branded email config.
@@ -117,9 +117,7 @@ Core V1 thesis:
 5. CV-028: GoodHealth and GoodWealth SSO federation backend.
 6. CV-029: embedded portal SDK and view-only integration flow.
 7. CV-030: V2 integration hardening and launch checklist.
-
-### V3 backlog
-1. AI delivery pipeline stages and approval-gate orchestration.
+8. AI delivery pipeline stages and approval-gate orchestration.
 
 ## 10. Local execution runbook
 1. Install dependencies:

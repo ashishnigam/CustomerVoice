@@ -1,6 +1,6 @@
 # CustomerVoice Summary and Phase Snapshot
 
-Last updated: 2026-03-07
+Last updated: 2026-03-08
 
 ## Project Overview
 CustomerVoice is a feedback and roadmap platform with:
@@ -53,8 +53,9 @@ CustomerVoice is a feedback and roadmap platform with:
 - Phases 1-6: complete baseline in code.
 - External SaaS commercialization now drives prioritization ahead of sister-company SSO/embed work.
 - AI workflow platform work is explicitly deferred until the current feedback product is more stable.
-- Immediate correctness gate before larger roadmap picks: callback auth, enterprise access UX, and restricted-board access enforcement.
-- Next planning focus: consolidated Phase 7 planning in `docs/CustomerVoice-Phase7-Planning.md`, with final Phase 7 vs Phase 8 split still open.
+- Phase 7 is now locked to true multi-tenant foundation: enterprise-domain tenant resolution, personal tenants for public-email users, tenant-aware auth/session handling, tenant-aware public routing, SSO/domain administration, and migration/cutover.
+- Immediate correctness work for callback auth, enterprise access UX, and restricted-board enforcement is included inside the Phase 7 tenant-hardening track.
+- All previously discussed non-tenancy feature expansion now moves to Phase 8.
 
 ## Key References
 - `docs/CustomerVoice-Phases.md`
