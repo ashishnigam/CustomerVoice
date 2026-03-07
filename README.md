@@ -108,7 +108,12 @@ Default local URLs:
 - Web app: `http://localhost:3333/app`
 - API: `http://localhost:4000`
 - API health: `http://localhost:4000/health`
+- Redis: `redis://localhost:6379`
+- MailHog SMTP: `localhost:1025`
 - MailHog UI: `http://localhost:8025`
+- MinIO API: `http://localhost:9000`
+- MinIO UI: `http://localhost:9001`
+- Postgres: `localhost:55432`
 
 If port `3333` is already occupied, Vite will automatically move the web app to the next free port, typically `3334`.
 

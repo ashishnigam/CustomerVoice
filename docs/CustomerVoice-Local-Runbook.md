@@ -9,7 +9,12 @@ Use this runbook for starting, stopping, and debugging the local CustomerVoice p
 - Customer board route: `http://localhost:3333/app/boards/:slug`
 - API: `http://localhost:4000`
 - API health: `http://localhost:4000/health`
+- Redis: `redis://localhost:6379`
+- MailHog SMTP: `localhost:1025`
 - MailHog UI: `http://localhost:8025`
+- MinIO API: `http://localhost:9000`
+- MinIO UI: `http://localhost:9001`
+- Postgres: `localhost:55432`
 
 If `3333` is already occupied, Vite will move the web app to the next free port, usually `3334`.
 
