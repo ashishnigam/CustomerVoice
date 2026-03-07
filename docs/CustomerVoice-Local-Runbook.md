@@ -4,14 +4,14 @@
 Use this runbook for starting, stopping, and debugging the local CustomerVoice product stack.
 
 ## What Runs Where
-- Marketing site: `http://localhost:3000`
-- Operator shell: `http://localhost:3000/app`
-- Customer board route: `http://localhost:3000/app/boards/:slug`
+- Marketing site: `http://localhost:3333`
+- Operator shell: `http://localhost:3333/app`
+- Customer board route: `http://localhost:3333/app/boards/:slug`
 - API: `http://localhost:4000`
 - API health: `http://localhost:4000/health`
 - MailHog UI: `http://localhost:8025`
 
-If `3000` is already occupied, Vite will move the web app to the next free port, usually `3001`.
+If `3333` is already occupied, Vite will move the web app to the next free port, usually `3334`.
 
 ## Quick Start / Stop (Single Command)
 
@@ -65,8 +65,8 @@ If you also want Expo mobile running:
 pnpm dev:all
 ```
 
-## When Postgres `5432` Is Busy
-If another local database is already bound to `5432`, start the Docker stack on `55432` instead:
+## When Postgres `55432` Is Busy
+If another local database is already bound to `55432`, stop that DB or map PostgreSQL to a different port by overriding `POSTGRES_PORT`.
 ```bash
 POSTGRES_PORT=55432 pnpm infra:up
 ```
@@ -91,7 +91,7 @@ pnpm infra:down
 
 - If you need to inspect a port before stopping it:
 ```bash
-lsof -nP -iTCP:3000 -sTCP:LISTEN
+lsof -nP -iTCP:3333 -sTCP:LISTEN
 lsof -nP -iTCP:4000 -sTCP:LISTEN
 ```
 
@@ -158,7 +158,7 @@ Use these values on the `/app` sign-in screen unless you are explicitly testing 
 
 ## Recommended Smoke Test
 1. Start the stack.
-2. Open `http://localhost:3000/app`.
+2. Open `http://localhost:3333/app`.
 3. Sign in with the seeded mock admin.
 4. Create a board and confirm the app moves to `/app/boards/:slug`.
 5. Create categories and submit ideas.

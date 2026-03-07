@@ -3277,7 +3277,7 @@ export async function createPasswordResetToken(params: {
     [id, params.userId, token, minutes],
   );
 
-  const portalAppUrl = process.env.VITE_APP_URL || 'http://localhost:3000/portal';
+  const portalAppUrl = process.env.VITE_APP_URL || 'http://localhost:3333/portal';
   const resetLink = `${portalAppUrl}/auth/reset-password?token=${token}`;
 
   await createNotificationJob({

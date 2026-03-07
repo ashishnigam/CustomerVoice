@@ -104,13 +104,13 @@ Use `pnpm dev:all` if you also want Expo mobile running.
 Node services automatically load env values from workspace-root `.env` and per-app `.env` files.
 
 Default local URLs:
-- Website: `http://localhost:3000`
-- Web app: `http://localhost:3000/app`
+- Website: `http://localhost:3333`
+- Web app: `http://localhost:3333/app`
 - API: `http://localhost:4000`
 - API health: `http://localhost:4000/health`
 - MailHog UI: `http://localhost:8025`
 
-If port `3000` is already occupied, Vite will automatically move the web app to the next free port, typically `3001`.
+If port `3333` is already occupied, Vite will automatically move the web app to the next free port, typically `3334`.
 
 If local port `5432` is already in use, use `55432` for Docker Postgres:
 ```bash
@@ -144,7 +144,7 @@ In this mode, API validates bearer tokens and resolves role from `workspace_memb
 
 ## Worker / email configuration
 Local worker defaults in `/Users/ashishnigam/Startups/CustomerVoice/apps/worker/.env.example`:
-- `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice`
+- `DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice`
 - `SMTP_HOST=localhost`
 - `SMTP_PORT=1025`
 - `WORKER_FROM_EMAIL=notifications@customervoice.local`
@@ -173,12 +173,12 @@ The DB-backed suite requires a Postgres instance in `DATABASE_URL`.
 Example isolated run:
 ```bash
 docker compose -f infra/docker/docker-compose.yml up -d postgres
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice pnpm --filter @customervoice/api db:migrate
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customervoice pnpm --filter @customervoice/api test:integration:db
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm --filter @customervoice/api db:migrate
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/customervoice pnpm --filter @customervoice/api test:integration:db
 ```
 
 ## Manual test flow
-1. Open `http://localhost:3000` for the marketing website or `http://localhost:3000/app` for the application shell.
+1. Open `http://localhost:3333` for the marketing website or `http://localhost:3333/app` for the application shell.
 2. Use the API health check on the sign-in screen if the backend looks unavailable.
 3. Sign in with the seeded mock admin values in the app shell.
 4. Create a board and confirm the app moves to `/app/boards/:slug`.

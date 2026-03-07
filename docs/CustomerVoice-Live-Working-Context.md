@@ -138,11 +138,11 @@ pnpm dev
 ```
 
 ## 11. Local URLs
-1. Website and web app shell: `http://localhost:3000`
-2. Direct application route: `http://localhost:3000/app`
+1. Website and web app shell: `http://localhost:3333`
+2. Direct application route: `http://localhost:3333/app`
 3. API: `http://localhost:4000`
 4. MailHog: `http://localhost:8025`
-5. Local Postgres host port: `55432` when `5432` is already occupied.
+5. Local Postgres host port: `55432` by default.
 
 ## 12. Test commands
 ```bash

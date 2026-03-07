@@ -1046,7 +1046,7 @@ publicRouter.get(
         const { token } = await createPortalSession({ userId: record.user.id });
 
         // Redirect back to portal with token.
-        const portalUrl = process.env.VITE_APP_URL || 'http://localhost:3000/portal';
+        const portalUrl = process.env.VITE_APP_URL || 'http://localhost:3333/portal';
         res.redirect(`${portalUrl}/auth/callback?token=${token}`);
     })
 );

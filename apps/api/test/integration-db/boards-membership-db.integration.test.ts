@@ -117,7 +117,7 @@ describe('db-backed integration: portal parity v1 flows', () => {
   beforeAll(async () => {
     process.env.AUTH_MODE = 'mock';
     process.env.DATABASE_URL =
-      process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/customervoice_ci';
+      process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:55432/customervoice_ci';
 
     const appModule = await import('../../src/app.js');
     const dbModule = await import('../../src/db/client.js');

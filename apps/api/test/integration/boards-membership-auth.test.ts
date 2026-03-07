@@ -43,7 +43,7 @@ vi.mock('../../src/db/repositories.js', () => repositoryMock);
 
 process.env.AUTH_MODE = 'mock';
 process.env.DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/customervoice_test';
+  process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:55432/customervoice_test';
 
 function authHeaders(params: {
   role: string;

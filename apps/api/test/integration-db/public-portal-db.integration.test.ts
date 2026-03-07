@@ -65,7 +65,7 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
     beforeAll(async () => {
         process.env.AUTH_MODE = 'mock'; // Keep mock for admin routes, but public routes use local JWT
         process.env.DATABASE_URL =
-            process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/customervoice_ci';
+            process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:55432/customervoice_ci';
         process.env.JWT_SECRET = 'test-secret-key';
 
         const appModule = await import('../../src/app.js');
