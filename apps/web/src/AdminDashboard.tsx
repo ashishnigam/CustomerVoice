@@ -23,7 +23,15 @@ type Idea = {
 
 type BoardSettings = {
     boardId: string;
+    accessMode: 'public' | 'link_only' | 'private' | 'domain_restricted';
+    requireAuthToVote: boolean;
+    requireAuthToComment: boolean;
+    requireAuthToSubmit: boolean;
+    enableIdeaSubmission: boolean;
+    enableCommenting: boolean;
+    showVoteCount: boolean;
     portalTitle: string | null;
+    welcomeMessage: string | null;
     customAccentColor: string | null;
     customLogoUrl: string | null;
     headerBgColor: string | null;
@@ -50,7 +58,7 @@ function requestHeaders(params: Session): Record<string, string> {
     return headers;
 }
 
-const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
+const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
 export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate: (path: string) => void }) {
     const parts = path.split('/');
@@ -76,6 +84,15 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
     const [accentColor, setAccentColor] = useState('#000000');
     const [logoUrl, setLogoUrl] = useState('');
     const [hidePoweredBy, setHidePoweredBy] = useState(false);
+    const [accessMode, setAccessMode] = useState<'public' | 'link_only' | 'private' | 'domain_restricted'>('public');
+    const [requireAuthToVote, setRequireAuthToVote] = useState(false);
+    const [requireAuthToComment, setRequireAuthToComment] = useState(true);
+    const [requireAuthToSubmit, setRequireAuthToSubmit] = useState(true);
+    const [enableIdeaSubmission, setEnableIdeaSubmission] = useState(true);
+    const [enableCommenting, setEnableCommenting] = useState(true);
+    const [showVoteCount, setShowVoteCount] = useState(true);
+    const [portalTitle, setPortalTitle] = useState('');
+    const [welcomeMessage, setWelcomeMessage] = useState('');
     const [saveBusy, setSaveBusy] = useState(false);
 
     const [changelogTitle, setChangelogTitle] = useState('');
@@ -109,6 +126,15 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                     setAccentColor(data.customAccentColor || '#000000');
                     setLogoUrl(data.customLogoUrl || '');
                     setHidePoweredBy(data.hidePoweredBy || false);
+                    setAccessMode(data.accessMode || 'public');
+                    setRequireAuthToVote(Boolean(data.requireAuthToVote));
+                    setRequireAuthToComment(Boolean(data.requireAuthToComment));
+                    setRequireAuthToSubmit(Boolean(data.requireAuthToSubmit));
+                    setEnableIdeaSubmission(data.enableIdeaSubmission !== false);
+                    setEnableCommenting(data.enableCommenting !== false);
+                    setShowVoteCount(data.showVoteCount !== false);
+                    setPortalTitle(data.portalTitle || '');
+                    setWelcomeMessage(data.welcomeMessage || '');
                 }
             } catch (err) {
                 console.error(err);
@@ -121,7 +147,7 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
         if (!session || !boardId) return;
         try {
             const h = requestHeaders(session);
-            const res = await fetch(`${apiBase}/workspaces/${session.workspaceId}/boards/${boardId}/ideas?status=all&sort=newest`, { headers: h });
+            const res = await fetch(`${apiBase}/workspaces/${session.workspaceId}/boards/${boardId}/ideas?sort=newest`, { headers: h });
             if (res.ok) {
                 const data = await res.json();
                 setIdeas(data.items);
@@ -179,6 +205,15 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
                 method: 'PATCH',
                 headers: h,
                 body: JSON.stringify({
+                    accessMode,
+                    requireAuthToVote,
+                    requireAuthToComment,
+                    requireAuthToSubmit,
+                    enableIdeaSubmission,
+                    enableCommenting,
+                    showVoteCount,
+                    portalTitle: portalTitle.trim() || null,
+                    welcomeMessage: welcomeMessage.trim() || null,
                     headerBgColor: bgColor,
                     customAccentColor: accentColor,
                     customLogoUrl: logoUrl,
@@ -289,8 +324,52 @@ export function AdminDashboard({ path, onNavigate }: { path: string; onNavigate:
             <main style={{ padding: '24px', maxWidth: '1000px', margin: '0 auto' }}>
                 {currentTab === 'settings' && (
                     <div style={{ background: 'var(--cv-elevated)', padding: '2rem', borderRadius: '12px', border: '1px solid var(--cv-border)' }}>
-                        <h2 style={{ marginBottom: '1.5rem' }}>Branding Settings</h2>
+                        <h2 style={{ marginBottom: '1.5rem' }}>Portal Settings</h2>
                         <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                            <div className="cp-form-group">
+                                <label>Access Mode</label>
+                                <select value={accessMode} onChange={e => setAccessMode(e.target.value as 'public' | 'link_only' | 'private' | 'domain_restricted')}>
+                                    <option value="public">Public</option>
+                                    <option value="link_only">Link Only</option>
+                                    <option value="private">Private</option>
+                                    <option value="domain_restricted">Domain Restricted</option>
+                                </select>
+                            </div>
+                            <div className="cp-form-group">
+                                <label>Portal Title</label>
+                                <input value={portalTitle} onChange={e => setPortalTitle(e.target.value)} placeholder="Customer Feedback Portal" />
+                            </div>
+                            <div className="cp-form-group">
+                                <label>Welcome Message</label>
+                                <textarea value={welcomeMessage} onChange={e => setWelcomeMessage(e.target.value)} rows={3} placeholder="Share your ideas and vote on what we build next." />
+                            </div>
+                            <div className="cp-form-group" style={{ gap: '10px' }}>
+                                <label style={{ marginBottom: '4px' }}>Interaction Controls</label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 0 }}>
+                                    <input type="checkbox" checked={requireAuthToVote} onChange={e => setRequireAuthToVote(e.target.checked)} style={{ width: 'auto' }} />
+                                    Require auth to vote
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 0 }}>
+                                    <input type="checkbox" checked={requireAuthToComment} onChange={e => setRequireAuthToComment(e.target.checked)} style={{ width: 'auto' }} />
+                                    Require auth to comment
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 0 }}>
+                                    <input type="checkbox" checked={requireAuthToSubmit} onChange={e => setRequireAuthToSubmit(e.target.checked)} style={{ width: 'auto' }} />
+                                    Require auth to submit ideas
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 0 }}>
+                                    <input type="checkbox" checked={enableIdeaSubmission} onChange={e => setEnableIdeaSubmission(e.target.checked)} style={{ width: 'auto' }} />
+                                    Enable idea submission
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 0 }}>
+                                    <input type="checkbox" checked={enableCommenting} onChange={e => setEnableCommenting(e.target.checked)} style={{ width: 'auto' }} />
+                                    Enable commenting
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 0 }}>
+                                    <input type="checkbox" checked={showVoteCount} onChange={e => setShowVoteCount(e.target.checked)} style={{ width: 'auto' }} />
+                                    Show vote counts
+                                </label>
+                            </div>
                             <div className="cp-form-group">
                                 <label>Header Background Color</label>
                                 <div style={{ display: 'flex', gap: '8px' }}>

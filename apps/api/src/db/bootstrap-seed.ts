@@ -80,6 +80,29 @@ export async function runBootstrapSeed(): Promise<void> {
       ],
     );
 
+    // Ensure board settings exist for seeded board.
+    await client.query(
+      `
+        INSERT INTO board_settings (board_id)
+        VALUES ($1)
+        ON CONFLICT (board_id) DO NOTHING
+      `,
+      [boardId],
+    );
+
+    // Seed a deterministic SSO connection for local E2E and manual validation.
+    await client.query(
+      `
+        INSERT INTO sso_connections (
+          id, workspace_id, provider, domain, client_id, client_secret, metadata_url, active
+        )
+        VALUES ($1, $2, 'custom_saml', 'acme.corp', 'demo-client', 'demo-secret', 'https://idp.acme.corp/metadata', TRUE)
+        ON CONFLICT (workspace_id, domain)
+        DO UPDATE SET provider = EXCLUDED.provider, active = TRUE, metadata_url = EXCLUDED.metadata_url
+      `,
+      ['sso00000-0000-0000-0000-000000000001', workspaceId],
+    );
+
     // Create 3 categories
     const catUxId = 'c0000000-0000-0000-0000-000000000001';
     const catIntegrationId = 'c0000000-0000-0000-0000-000000000002';

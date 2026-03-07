@@ -227,7 +227,7 @@ export interface IdeaVoteRecord {
   hasVoted: boolean;
 }
 
-export type IdeaSortMode = 'top_voted' | 'most_commented' | 'newest';
+export type IdeaSortMode = 'top_voted' | 'most_commented' | 'newest' | 'highest_impact';
 
 export interface IdeaCategoryRecord {
   id: string;
@@ -837,6 +837,7 @@ export async function listIdeas(params: {
         CASE WHEN $11 = 'top_voted' THEN COALESCE(v.vote_count, 0) END DESC,
         CASE WHEN $11 = 'most_commented' THEN COALESCE(c.comment_count, 0) END DESC,
         CASE WHEN $11 = 'newest' THEN i.created_at END DESC,
+        CASE WHEN $11 = 'highest_impact' THEN COALESCE(v.impact_score, 0) END DESC,
         COALESCE(v.vote_count, 0) DESC,
         COALESCE(c.comment_count, 0) DESC,
         i.created_at DESC
@@ -1211,6 +1212,7 @@ export async function listIdeaComments(params: {
         c.body,
         c.active,
         c.is_official,
+        c.is_internal,
         c.is_team_member,
         c.created_at,
         c.updated_at
@@ -3099,6 +3101,7 @@ export interface ThreadedCommentRecord {
   active: boolean;
   isOfficial: boolean;
   isTeamMember: boolean;
+  isInternal: boolean;
   parentCommentId: string | null;
   upvoteCount: number;
   createdAt: string;
@@ -3115,6 +3118,7 @@ interface ThreadedCommentRow {
   active: boolean;
   is_official: boolean;
   is_team_member: boolean;
+  is_internal: boolean;
   parent_comment_id: string | null;
   upvote_count: number;
   created_at: string;
@@ -3132,6 +3136,7 @@ function mapThreadedComment(row: ThreadedCommentRow): ThreadedCommentRecord {
     active: row.active,
     isOfficial: row.is_official,
     isTeamMember: row.is_team_member,
+    isInternal: row.is_internal ?? false,
     parentCommentId: row.parent_comment_id,
     upvoteCount: Number(row.upvote_count),
     createdAt: row.created_at,
@@ -3142,18 +3147,20 @@ function mapThreadedComment(row: ThreadedCommentRow): ThreadedCommentRecord {
 export async function listThreadedComments(params: {
   workspaceId: string;
   ideaId: string;
+  excludeInternal?: boolean;
 }): Promise<ThreadedCommentRecord[]> {
   const result = await query<ThreadedCommentRow>(
     `
       SELECT
         c.id, c.workspace_id, c.idea_id, c.user_id,
         u.email AS user_email,
-        c.body, c.active, c.is_official, c.is_team_member,
+        c.body, c.active, c.is_official, c.is_team_member, c.is_internal,
         c.parent_comment_id, c.upvote_count,
         c.created_at, c.updated_at
       FROM idea_comments c
       JOIN users u ON u.id = c.user_id
       WHERE c.workspace_id = $1 AND c.idea_id = $2 AND c.active = TRUE
+      ${params.excludeInternal ? 'AND c.is_internal = FALSE' : ''}
       ORDER BY c.created_at ASC
     `,
     [params.workspaceId, params.ideaId],
@@ -3168,6 +3175,7 @@ export async function createThreadedComment(params: {
   userEmail: string;
   body: string;
   parentCommentId?: string;
+  isInternal?: boolean;
 }): Promise<ThreadedCommentRecord> {
   // Check if comments are locked
   const ideaResult = await query<{ comments_locked: boolean }>(
@@ -3189,18 +3197,36 @@ export async function createThreadedComment(params: {
     displayName: params.userEmail.split('@')[0],
   });
 
+  // Only allow is_internal if the user is a team member.
+  let isInternal = false;
+  if (params.isInternal) {
+    const membershipResult = await query(
+      `SELECT 1 FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2 AND active = TRUE LIMIT 1`,
+      [params.workspaceId, params.userId],
+    );
+    isInternal = (membershipResult.rowCount ?? 0) > 0;
+  }
+
   const id = uuidv4();
   const result = await query<ThreadedCommentRow>(
     `
-      INSERT INTO idea_comments (id, workspace_id, idea_id, user_id, body, parent_comment_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO idea_comments (id, workspace_id, idea_id, user_id, body, parent_comment_id, is_internal)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING
         id, workspace_id, idea_id, user_id,
         (SELECT email FROM users WHERE id = $4) AS user_email,
-        body, active, is_official, is_team_member, parent_comment_id, upvote_count,
+        body, active, is_official, is_team_member, is_internal, parent_comment_id, upvote_count,
         created_at, updated_at
     `,
-    [id, params.workspaceId, params.ideaId, params.userId, params.body, params.parentCommentId ?? null],
+    [
+      id,
+      params.workspaceId,
+      params.ideaId,
+      params.userId,
+      params.body,
+      params.parentCommentId ?? null,
+      isInternal,
+    ],
   );
 
   return mapThreadedComment(result.rows[0]);
@@ -3373,6 +3399,20 @@ export async function getBoardSettingsExtended(boardId: string): Promise<BoardSe
 
 export async function updateBoardSettings(params: {
   boardId: string;
+  accessMode?: PortalAccessMode;
+  allowedDomains?: string[];
+  allowedEmails?: string[];
+  requireAuthToVote?: boolean;
+  requireAuthToComment?: boolean;
+  requireAuthToSubmit?: boolean;
+  allowAnonymousIdeas?: boolean;
+  portalTitle?: string | null;
+  showVoteCount?: boolean;
+  showStatusFilter?: boolean;
+  showCategoryFilter?: boolean;
+  enableIdeaSubmission?: boolean;
+  enableCommenting?: boolean;
+  welcomeMessage?: string | null;
   customAccentColor?: string | null;
   customLogoUrl?: string | null;
   headerBgColor?: string | null;
@@ -3380,10 +3420,71 @@ export async function updateBoardSettings(params: {
   fontFamily?: string | null;
   hidePoweredBy?: boolean;
 }): Promise<BoardSettingsExtendedRecord> {
-  let updateParts: string[] = [];
-  let values: unknown[] = [params.boardId];
+  await query(
+    `INSERT INTO board_settings (board_id) VALUES ($1) ON CONFLICT (board_id) DO NOTHING`,
+    [params.boardId],
+  );
+
+  const updateParts: string[] = [];
+  const values: unknown[] = [params.boardId];
   let idx = 2;
 
+  if (params.accessMode !== undefined) {
+    updateParts.push(`access_mode = $${idx++}`);
+    values.push(params.accessMode);
+  }
+  if (params.allowedDomains !== undefined) {
+    updateParts.push(`allowed_domains = $${idx++}`);
+    values.push(params.allowedDomains);
+  }
+  if (params.allowedEmails !== undefined) {
+    updateParts.push(`allowed_emails = $${idx++}`);
+    values.push(params.allowedEmails);
+  }
+  if (params.requireAuthToVote !== undefined) {
+    updateParts.push(`require_auth_to_vote = $${idx++}`);
+    values.push(params.requireAuthToVote);
+  }
+  if (params.requireAuthToComment !== undefined) {
+    updateParts.push(`require_auth_to_comment = $${idx++}`);
+    values.push(params.requireAuthToComment);
+  }
+  if (params.requireAuthToSubmit !== undefined) {
+    updateParts.push(`require_auth_to_submit = $${idx++}`);
+    values.push(params.requireAuthToSubmit);
+  }
+  if (params.allowAnonymousIdeas !== undefined) {
+    updateParts.push(`allow_anonymous_ideas = $${idx++}`);
+    values.push(params.allowAnonymousIdeas);
+  }
+  if (params.portalTitle !== undefined) {
+    updateParts.push(`portal_title = $${idx++}`);
+    values.push(params.portalTitle);
+  }
+  if (params.showVoteCount !== undefined) {
+    updateParts.push(`show_vote_count = $${idx++}`);
+    values.push(params.showVoteCount);
+  }
+  if (params.showStatusFilter !== undefined) {
+    updateParts.push(`show_status_filter = $${idx++}`);
+    values.push(params.showStatusFilter);
+  }
+  if (params.showCategoryFilter !== undefined) {
+    updateParts.push(`show_category_filter = $${idx++}`);
+    values.push(params.showCategoryFilter);
+  }
+  if (params.enableIdeaSubmission !== undefined) {
+    updateParts.push(`enable_idea_submission = $${idx++}`);
+    values.push(params.enableIdeaSubmission);
+  }
+  if (params.enableCommenting !== undefined) {
+    updateParts.push(`enable_commenting = $${idx++}`);
+    values.push(params.enableCommenting);
+  }
+  if (params.welcomeMessage !== undefined) {
+    updateParts.push(`welcome_message = $${idx++}`);
+    values.push(params.welcomeMessage);
+  }
   if (params.customAccentColor !== undefined) {
     updateParts.push(`custom_accent_color = $${idx++}`);
     values.push(params.customAccentColor);
@@ -3768,15 +3869,19 @@ export interface SsoConnectionRecord {
   createdAt: string;
 }
 
-export async function findSsoConnectionByDomain(domain: string): Promise<SsoConnectionRecord | null> {
-  const result = await query(
-    `SELECT * FROM sso_connections WHERE domain = $1 AND active = TRUE LIMIT 1`,
-    [domain.toLowerCase().trim()]
-  );
+interface SsoConnectionRow {
+  id: string;
+  workspace_id: string;
+  provider: 'okta' | 'azure' | 'custom_saml' | 'oidc';
+  domain: string;
+  client_id: string | null;
+  client_secret: string | null;
+  metadata_url: string | null;
+  active: boolean;
+  created_at: string;
+}
 
-  if ((result.rowCount ?? 0) === 0) return null;
-
-  const row = result.rows[0];
+function mapSsoConnection(row: SsoConnectionRow): SsoConnectionRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -3788,4 +3893,122 @@ export async function findSsoConnectionByDomain(domain: string): Promise<SsoConn
     active: row.active,
     createdAt: row.created_at,
   };
+}
+
+export async function findSsoConnectionByDomain(domain: string): Promise<SsoConnectionRecord | null> {
+  const result = await query<SsoConnectionRow>(
+    `SELECT * FROM sso_connections WHERE domain = $1 AND active = TRUE LIMIT 1`,
+    [domain.toLowerCase().trim()]
+  );
+
+  if ((result.rowCount ?? 0) === 0) return null;
+  return mapSsoConnection(result.rows[0]);
+}
+
+export async function listSsoConnections(workspaceId: string): Promise<SsoConnectionRecord[]> {
+  const result = await query<SsoConnectionRow>(
+    `SELECT * FROM sso_connections WHERE workspace_id = $1 ORDER BY created_at DESC`,
+    [workspaceId],
+  );
+  return result.rows.map(mapSsoConnection);
+}
+
+export async function createSsoConnection(params: {
+  workspaceId: string;
+  provider: 'okta' | 'azure' | 'custom_saml' | 'oidc';
+  domain: string;
+  clientId?: string | null;
+  clientSecret?: string | null;
+  metadataUrl?: string | null;
+  active?: boolean;
+}): Promise<SsoConnectionRecord> {
+  const id = uuidv4();
+  const result = await query<SsoConnectionRow>(
+    `
+      INSERT INTO sso_connections (
+        id, workspace_id, provider, domain, client_id, client_secret, metadata_url, active
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `,
+    [
+      id,
+      params.workspaceId,
+      params.provider,
+      params.domain.toLowerCase().trim(),
+      params.clientId ?? null,
+      params.clientSecret ?? null,
+      params.metadataUrl ?? null,
+      params.active ?? true,
+    ],
+  );
+  return mapSsoConnection(result.rows[0]);
+}
+
+export async function updateSsoConnection(
+  id: string,
+  workspaceId: string,
+  params: {
+    provider?: 'okta' | 'azure' | 'custom_saml' | 'oidc';
+    domain?: string;
+    clientId?: string | null;
+    clientSecret?: string | null;
+    metadataUrl?: string | null;
+    active?: boolean;
+  },
+): Promise<SsoConnectionRecord | null> {
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (params.provider !== undefined) {
+    updates.push(`provider = $${idx++}`);
+    values.push(params.provider);
+  }
+  if (params.domain !== undefined) {
+    updates.push(`domain = $${idx++}`);
+    values.push(params.domain.toLowerCase().trim());
+  }
+  if (params.clientId !== undefined) {
+    updates.push(`client_id = $${idx++}`);
+    values.push(params.clientId);
+  }
+  if (params.clientSecret !== undefined) {
+    updates.push(`client_secret = $${idx++}`);
+    values.push(params.clientSecret);
+  }
+  if (params.metadataUrl !== undefined) {
+    updates.push(`metadata_url = $${idx++}`);
+    values.push(params.metadataUrl);
+  }
+  if (params.active !== undefined) {
+    updates.push(`active = $${idx++}`);
+    values.push(params.active);
+  }
+
+  if (updates.length === 0) {
+    const existing = await query<SsoConnectionRow>(
+      `SELECT * FROM sso_connections WHERE id = $1 AND workspace_id = $2 LIMIT 1`,
+      [id, workspaceId],
+    );
+    if ((existing.rowCount ?? 0) === 0) return null;
+    return mapSsoConnection(existing.rows[0]);
+  }
+
+  values.push(id);
+  const idPos = idx++;
+  values.push(workspaceId);
+  const workspacePos = idx++;
+
+  const result = await query<SsoConnectionRow>(
+    `
+      UPDATE sso_connections
+      SET ${updates.join(', ')}
+      WHERE id = $${idPos} AND workspace_id = $${workspacePos}
+      RETURNING *
+    `,
+    values,
+  );
+  if ((result.rowCount ?? 0) === 0) return null;
+  return mapSsoConnection(result.rows[0]);
 }

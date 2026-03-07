@@ -6,6 +6,7 @@ import { emitAudit } from '../lib/audit.js';
 import { enforceWorkspaceScope, requirePermission, type RequestWithActor } from '../middleware/auth.js';
 
 const visibilitySchema = z.enum(['public', 'private']);
+const portalAccessModeSchema = z.enum(['public', 'link_only', 'private', 'domain_restricted']);
 
 const createBoardSchema = z.object({
   name: z.string().min(2).max(120),
@@ -24,14 +25,32 @@ const updateBoardSchema = z
     message: 'at least one field is required',
   });
 
-const updateBoardSettingsSchema = z.object({
-  customAccentColor: z.string().nullable().optional(),
-  customLogoUrl: z.string().nullable().optional(),
-  headerBgColor: z.string().nullable().optional(),
-  customCss: z.string().nullable().optional(),
-  fontFamily: z.string().nullable().optional(),
-  hidePoweredBy: z.boolean().optional(),
-});
+const updateBoardSettingsSchema = z
+  .object({
+    accessMode: portalAccessModeSchema.optional(),
+    allowedDomains: z.array(z.string().trim().min(1)).max(50).optional(),
+    allowedEmails: z.array(z.string().email()).max(200).optional(),
+    requireAuthToVote: z.boolean().optional(),
+    requireAuthToComment: z.boolean().optional(),
+    requireAuthToSubmit: z.boolean().optional(),
+    allowAnonymousIdeas: z.boolean().optional(),
+    portalTitle: z.string().max(180).nullable().optional(),
+    showVoteCount: z.boolean().optional(),
+    showStatusFilter: z.boolean().optional(),
+    showCategoryFilter: z.boolean().optional(),
+    enableIdeaSubmission: z.boolean().optional(),
+    enableCommenting: z.boolean().optional(),
+    welcomeMessage: z.string().max(4000).nullable().optional(),
+    customAccentColor: z.string().nullable().optional(),
+    customLogoUrl: z.string().nullable().optional(),
+    headerBgColor: z.string().nullable().optional(),
+    customCss: z.string().nullable().optional(),
+    fontFamily: z.string().nullable().optional(),
+    hidePoweredBy: z.boolean().optional(),
+  })
+  .refine((payload) => Object.keys(payload).length > 0, {
+    message: 'at least one field is required',
+  });
 
 const listQuerySchema = z.object({
   includeInactive: z.coerce.boolean().optional(),
@@ -184,6 +203,20 @@ boardsRouter.patch(
 
     const updatedSettings = await updateBoardSettings({
       boardId,
+      accessMode: parsed.data.accessMode,
+      allowedDomains: parsed.data.allowedDomains,
+      allowedEmails: parsed.data.allowedEmails,
+      requireAuthToVote: parsed.data.requireAuthToVote,
+      requireAuthToComment: parsed.data.requireAuthToComment,
+      requireAuthToSubmit: parsed.data.requireAuthToSubmit,
+      allowAnonymousIdeas: parsed.data.allowAnonymousIdeas,
+      portalTitle: parsed.data.portalTitle,
+      showVoteCount: parsed.data.showVoteCount,
+      showStatusFilter: parsed.data.showStatusFilter,
+      showCategoryFilter: parsed.data.showCategoryFilter,
+      enableIdeaSubmission: parsed.data.enableIdeaSubmission,
+      enableCommenting: parsed.data.enableCommenting,
+      welcomeMessage: parsed.data.welcomeMessage,
       customAccentColor: parsed.data.customAccentColor,
       customLogoUrl: parsed.data.customLogoUrl,
       headerBgColor: parsed.data.headerBgColor,

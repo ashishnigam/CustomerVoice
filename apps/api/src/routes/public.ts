@@ -17,7 +17,6 @@ import {
     findPortalUserByToken,
     createPortalSession,
     deletePortalSession,
-    createPublicIdeaComment,
     subscribeToIdea,
     unsubscribeFromIdea,
     getIdeaSubscription,
@@ -40,7 +39,6 @@ import {
     updatePortalUserPassword,
     listIdeaAttachments,
     insertIdeaAttachment,
-    listCommentAttachments,
     insertCommentAttachment,
 } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
@@ -50,7 +48,7 @@ import { addClient, broadcast } from '../lib/sse.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
-const ideaSortSchema = z.enum(['top_voted', 'most_commented', 'newest']).optional();
+const ideaSortSchema = z.enum(['top_voted', 'most_commented', 'newest', 'highest_impact']).optional();
 const ideaStatusSchema = z.enum([
     'new',
     'under_review',
@@ -90,6 +88,7 @@ const submitIdeaSchema = z.object({
 const commentSchema = z.object({
     body: z.string().trim().min(2).max(4000),
     parentCommentId: z.string().trim().uuid().optional(),
+    isInternal: z.boolean().optional(),
 });
 
 const profileUpdateSchema = z.object({
@@ -276,8 +275,8 @@ publicRouter.get(
 
         const useThreaded = req.query.threaded === 'true';
         const comments = useThreaded
-            ? await listThreadedComments({ workspaceId: board.workspaceId, ideaId: idea.id })
-            : await listIdeaComments({ workspaceId: board.workspaceId, ideaId: idea.id });
+            ? await listThreadedComments({ workspaceId: board.workspaceId, ideaId: idea.id, excludeInternal: true })
+            : await listIdeaComments({ workspaceId: board.workspaceId, ideaId: idea.id, excludeInternal: true });
 
         // Enrich with subscription/favorite state if authenticated
         let isSubscribed = false;
@@ -545,14 +544,15 @@ publicRouter.post(
         }
 
         try {
-            const comment = await createThreadedComment({
-                workspaceId: board.workspaceId,
-                ideaId,
-                userId,
-                userEmail,
-                body: parsed.data.body,
-                parentCommentId: parsed.data.parentCommentId,
-            });
+                const comment = await createThreadedComment({
+                    workspaceId: board.workspaceId,
+                    ideaId,
+                    userId,
+                    userEmail,
+                    body: parsed.data.body,
+                    parentCommentId: parsed.data.parentCommentId,
+                    isInternal: parsed.data.isInternal ?? false,
+                });
 
             broadcast(board.id, 'comment.created', { ideaId, comment });
             res.status(201).json(comment);
@@ -974,7 +974,10 @@ publicRouter.post(
     asyncHandler(async (req, res) => {
         const schema = z.object({
             token: z.string().min(1),
-            password: z.string().min(6).max(128),
+            password: z.string().min(6).max(128).optional(),
+            newPassword: z.string().min(6).max(128).optional(),
+        }).refine((value) => Boolean(value.password || value.newPassword), {
+            message: 'password_required',
         });
         const parsed = schema.safeParse(req.body);
 
@@ -990,7 +993,8 @@ publicRouter.post(
             return;
         }
 
-        const passwordHash = hashPassword(parsed.data.password);
+        const nextPassword = parsed.data.password ?? parsed.data.newPassword ?? '';
+        const passwordHash = hashPassword(nextPassword);
 
         await updatePortalUserPassword({
             userId: resetRecord.userId,

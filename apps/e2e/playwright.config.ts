@@ -8,7 +8,7 @@ export default defineConfig({
     workers: process.env.CI ? 1 : undefined,
     reporter: 'html',
     use: {
-        baseURL: 'http://localhost:5173',
+        baseURL: 'http://localhost:3333',
         trace: 'on-first-retry',
     },
     projects: [
@@ -17,10 +17,18 @@ export default defineConfig({
             use: { ...devices['Desktop Chrome'] },
         },
     ],
-    webServer: {
-        command: 'pnpm --filter @customervoice/web dev & pnpm --filter @customervoice/api dev',
-        url: 'http://localhost:5173',
-        reuseExistingServer: !process.env.CI,
-        timeout: 120 * 1000,
-    },
+    webServer: [
+        {
+            command: 'pnpm --filter @customervoice/api dev',
+            url: 'http://localhost:4000/health',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120 * 1000,
+        },
+        {
+            command: 'pnpm --filter @customervoice/web dev',
+            url: 'http://localhost:3333',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120 * 1000,
+        },
+    ],
 });

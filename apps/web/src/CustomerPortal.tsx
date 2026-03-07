@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 
 /* ── Types ── */
 type IdeaStatus = 'new' | 'under_review' | 'accepted' | 'planned' | 'in_progress' | 'completed' | 'declined';
-type IdeaSortMode = 'top_voted' | 'most_commented' | 'newest';
+type IdeaSortMode = 'top_voted' | 'most_commented' | 'newest' | 'highest_impact';
 type PortalAccessMode = 'public' | 'link_only' | 'private' | 'domain_restricted';
 
 interface Board {
@@ -148,6 +148,7 @@ const sortOptions: { value: IdeaSortMode; label: string; icon: string }[] = [
     { value: 'top_voted', label: 'Top Voted', icon: '🔥' },
     { value: 'most_commented', label: 'Most Discussed', icon: '💬' },
     { value: 'newest', label: 'Newest', icon: '🕐' },
+    { value: 'highest_impact', label: 'Highest Impact', icon: '💰' },
 ];
 
 function buildCommentTree(comments: IdeaComment[]): IdeaComment[] {
@@ -393,7 +394,7 @@ export function CustomerPortal({ path, onNavigate }: CustomerPortalProps): JSX.E
             const res = await fetch(`${apiBase}/public/auth/reset-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: resetToken, newPassword }),
+                body: JSON.stringify({ token: resetToken, password: newPassword }),
             });
             if (res.ok) {
                 setResetSuccess(true);

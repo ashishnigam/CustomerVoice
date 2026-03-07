@@ -1,7 +1,4 @@
 import { Router } from 'express';
-import passport from 'passport';
-import { Strategy as SamlStrategy } from 'passport-saml';
-import { z } from 'zod';
 import { createPortalSession, createPortalUser, findSsoConnectionByDomain } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
 
@@ -11,7 +8,7 @@ export const ssoRouter = Router();
 // but for simplicity we'll configure a dynamic Strategy mapping or just a simple callback endpoint.
 ssoRouter.get(
     '/auth/sso/login',
-    asyncHandler(async (req, res, next) => {
+    asyncHandler(async (req, res) => {
         const domain = typeof req.query.domain === 'string' ? req.query.domain : null;
         if (!domain) {
             res.status(400).json({ error: 'domain_required' });
@@ -66,7 +63,7 @@ ssoRouter.all(
             return;
         }
 
-        let user = await createPortalUser({
+        const user = await createPortalUser({
             email,
             authProvider: 'sso',
             providerId: connection.id,

@@ -9,6 +9,7 @@ import { membersRouter } from './routes/members.js';
 import { publicRouter } from './routes/public.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { ssoRouter } from './routes/sso.js';
+import { ssoConnectionsRouter } from './routes/sso-connections.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -27,6 +28,7 @@ export function createApp(): express.Express {
   app.use('/api/v1', requireActor, membersRouter);
   app.use('/api/v1', requireActor, auditRouter);
   app.use('/api/v1', requireActor, webhooksRouter);
+  app.use('/api/v1', requireActor, ssoConnectionsRouter);
 
   app.use(
     (err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {

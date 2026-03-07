@@ -271,7 +271,7 @@ const apiGroups = [
 
 const docsRoadmap = [
   'Jira and Linear are selected integration targets, but deep connector implementation is not in this V1 codebase yet.',
-  'GoodHealth.ai and GoodWealth.ai SSO plus embedded portal views are planned in V2, not delivered in the current local build.',
+  'Phase 6 delivered baseline enterprise SSO and embeddable portal widget support; provider hardening and advanced federation controls remain in post-Phase-6 work.',
   'AI-driven PRD, research, design, development, and release gates are intentionally moved to V3.',
 ];
 
@@ -866,7 +866,7 @@ function renderDocsOverview(onNavigate: NavigateFn): JSX.Element {
           <ul className="marketing-list">
             <li>`AUTH_MODE=mock` for seeded local actor headers.</li>
             <li>`AUTH_MODE=supabase` for bearer token verification and membership resolution.</li>
-            <li>Enterprise SSO and embed are planned for V2, not delivered in the current build.</li>
+            <li>Enterprise SSO login and embeddable widget baseline are available in the current build; hardening and expanded provider workflows continue in upcoming work.</li>
           </ul>
         </article>
       </section>
