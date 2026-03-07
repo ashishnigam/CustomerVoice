@@ -713,7 +713,7 @@ ideasRouter.get(
     if (actor) {
       const db = await import('../db/client.js');
       const membershipResult = await db.query(
-        `SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2 AND active = TRUE LIMIT 1`,
+        `SELECT 1 FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2 AND active = TRUE LIMIT 1`,
         [workspaceId, actor.userId]
       );
       isTeamMember = (membershipResult.rowCount ?? 0) > 0;
