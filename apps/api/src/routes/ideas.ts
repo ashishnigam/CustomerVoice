@@ -38,6 +38,7 @@ import {
   ideaModerationStateSchema,
   ideaStatusSchema,
 } from '../lib/types.js';
+import { broadcast } from '../lib/sse.js';
 import { enforceWorkspaceScope, requirePermission, type RequestWithActor } from '../middleware/auth.js';
 
 const ideaSortSchema = z.enum(['top_voted', 'most_commented', 'newest']);
@@ -528,6 +529,13 @@ ideasRouter.patch(
       res.status(404).json({ error: 'idea_not_found' });
       return;
     }
+
+    broadcast(boardId, 'idea.status.updated', {
+      ideaId,
+      previousStatus: before.status,
+      status: updated.status,
+      updatedAt: updated.updatedAt,
+    });
 
     let recipientCount = 0;
     if (before.status !== 'completed' && parsed.data.status === 'completed') {

@@ -370,52 +370,6 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         return h;
     }, [visitorId, authToken]);
 
-    /* ── SSE Live Updates ── */
-    useEffect(() => {
-        if (!boardSlug || !board || board._accessRestricted) return;
-
-        const eventSource = new EventSource(`${apiBase}/public/boards/${boardSlug}/stream`);
-
-        eventSource.addEventListener('idea.voted', (event) => {
-            try {
-                const data = JSON.parse(event.data) as { ideaId: string; delta: number };
-                setIdeas((prev) =>
-                    prev.map((i) =>
-                        i.id === data.ideaId ? { ...i, voteCount: i.voteCount + data.delta } : i
-                    )
-                );
-                setSelectedIdea((prev) =>
-                    prev && prev.id === data.ideaId
-                        ? { ...prev, voteCount: prev.voteCount + data.delta }
-                        : prev
-                );
-            } catch { /* ignore */ }
-        });
-
-        eventSource.addEventListener('comment.created', (event) => {
-            try {
-                const data = JSON.parse(event.data) as { ideaId: string; comment: IdeaComment };
-                // Increment comment count, but don't duplicate if the user just posted it themselves
-                // (we already optimistically incremented it for the author). However, this might double-count
-                // for the author unless we check if they authored it, but for simplicity, we'll let it fetch.
-                setIdeas((prev) =>
-                    prev.map((i) =>
-                        i.id === data.ideaId ? { ...i, commentCount: i.commentCount + 1 } : i
-                    )
-                );
-                setSelectedIdea((prev) =>
-                    prev && prev.id === data.ideaId
-                        ? { ...prev, commentCount: prev.commentCount + 1 }
-                        : prev
-                );
-            } catch { /* ignore */ }
-        });
-
-        return () => {
-            eventSource.close();
-        };
-    }, [board, boardSlug]);
-
     const rememberPostAuthPath = useCallback(() => {
         localStorage.setItem(
             portalPostAuthPathStorageKey,
@@ -995,6 +949,80 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     useEffect(() => {
         void loadIdeas();
     }, [loadIdeas]);
+
+    useEffect(() => {
+        if (!boardSlug || !board || board._accessRestricted) return;
+
+        const eventSource = new EventSource(`${apiBase}/public/boards/${boardSlug}/stream`);
+
+        eventSource.addEventListener('idea.voted', (event) => {
+            try {
+                const data = JSON.parse(event.data) as { ideaId: string; delta: number };
+                setIdeas((prev) =>
+                    prev.map((i) =>
+                        i.id === data.ideaId ? { ...i, voteCount: i.voteCount + data.delta } : i
+                    )
+                );
+                setSelectedIdea((prev) =>
+                    prev && prev.id === data.ideaId
+                        ? { ...prev, voteCount: prev.voteCount + data.delta }
+                        : prev
+                );
+            } catch { /* ignore */ }
+        });
+
+        eventSource.addEventListener('comment.created', (event) => {
+            try {
+                const data = JSON.parse(event.data) as { ideaId: string; comment: IdeaComment };
+                // Increment comment count, but don't duplicate if the user just posted it themselves
+                // (we already optimistically incremented it for the author). However, this might double-count
+                // for the author unless we check if they authored it, but for simplicity, we'll let it fetch.
+                setIdeas((prev) =>
+                    prev.map((i) =>
+                        i.id === data.ideaId ? { ...i, commentCount: i.commentCount + 1 } : i
+                    )
+                );
+                setSelectedIdea((prev) =>
+                    prev && prev.id === data.ideaId
+                        ? { ...prev, commentCount: prev.commentCount + 1 }
+                        : prev
+                );
+            } catch { /* ignore */ }
+        });
+
+        eventSource.addEventListener('idea.status.updated', (event) => {
+            try {
+                const data = JSON.parse(event.data) as { ideaId: string; status: IdeaStatus; updatedAt?: string };
+                setIdeas((prev) =>
+                    prev
+                        .map((idea) =>
+                            idea.id === data.ideaId
+                                ? {
+                                    ...idea,
+                                    status: data.status,
+                                    updatedAt: data.updatedAt ?? idea.updatedAt,
+                                }
+                                : idea,
+                        )
+                        .filter((idea) => statusFilter === 'all' || idea.status === statusFilter)
+                );
+                setSelectedIdea((prev) =>
+                    prev && prev.id === data.ideaId
+                        ? {
+                            ...prev,
+                            status: data.status,
+                            updatedAt: data.updatedAt ?? prev.updatedAt,
+                        }
+                        : prev
+                );
+                void loadIdeas();
+            } catch { /* ignore */ }
+        });
+
+        return () => {
+            eventSource.close();
+        };
+    }, [apiBase, board, boardSlug, loadIdeas, statusFilter]);
 
     useEffect(() => {
         if (deepLinkIdeaId) {

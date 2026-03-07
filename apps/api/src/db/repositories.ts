@@ -729,6 +729,7 @@ export async function listIdeas(params: {
   moderationState?: IdeaModerationState;
   includeInactive?: boolean;
   includeModerated?: boolean;
+  excludeInternalComments?: boolean;
   search?: string;
   categoryIds?: string[];
   sort?: IdeaSortMode;
@@ -812,7 +813,9 @@ export async function listIdeas(params: {
       LEFT JOIN (
         SELECT workspace_id, idea_id, COUNT(*) AS comment_count
         FROM idea_comments
-        WHERE workspace_id = $1 AND active = TRUE
+        WHERE workspace_id = $1
+          AND active = TRUE
+          AND ($13::boolean = FALSE OR is_internal = FALSE)
         GROUP BY workspace_id, idea_id
       ) c ON c.workspace_id = i.workspace_id AND c.idea_id = i.id
       WHERE i.workspace_id = $1
@@ -857,6 +860,7 @@ export async function listIdeas(params: {
       includeModerated,
       sort,
       clampedOffset,
+      params.excludeInternalComments ?? false,
     ],
   );
 
@@ -868,6 +872,7 @@ export async function findIdea(params: {
   boardId: string;
   ideaId: string;
   viewerId?: string;
+  excludeInternalComments?: boolean;
 }): Promise<IdeaRecord | null> {
   const result = await query<IdeaRow>(
     `
@@ -894,7 +899,10 @@ export async function findIdea(params: {
         (
           SELECT COUNT(*)::int
           FROM idea_comments ic
-          WHERE ic.workspace_id = i.workspace_id AND ic.idea_id = i.id AND ic.active = TRUE
+          WHERE ic.workspace_id = i.workspace_id
+            AND ic.idea_id = i.id
+            AND ic.active = TRUE
+            AND ($5::boolean = FALSE OR ic.is_internal = FALSE)
         ) AS comment_count,
         (
           SELECT COALESCE(SUM(pu.mrr), 0)::numeric
@@ -943,7 +951,13 @@ export async function findIdea(params: {
       WHERE i.workspace_id = $1 AND i.board_id = $2 AND i.id = $3
       LIMIT 1
     `,
-    [params.workspaceId, params.boardId, params.ideaId, params.viewerId ?? null],
+    [
+      params.workspaceId,
+      params.boardId,
+      params.ideaId,
+      params.viewerId ?? null,
+      params.excludeInternalComments ?? false,
+    ],
   );
 
   return (result.rowCount ?? 0) === 0 ? null : mapIdea(result.rows[0]);

@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, type PointerEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Role =
   | 'tenant_admin'
@@ -124,6 +124,40 @@ type ApiHealthState = {
   checkedAt: string | null;
 };
 
+type KanbanDropTarget = {
+  status: IdeaStatus;
+  index: number;
+};
+
+type KanbanDragIntent = {
+  ideaId: string;
+  sourceStatus: IdeaStatus;
+  sourceIndex: number;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+};
+
+type KanbanDragState = {
+  ideaId: string;
+  sourceStatus: IdeaStatus;
+  sourceIndex: number;
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+  pointerX: number;
+  pointerY: number;
+  target: KanbanDropTarget;
+};
+
+const kanbanDragStartThreshold = 6;
+
 const defaultApiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1';
 const defaultWorkspaceId = '22222222-2222-2222-2222-222222222222';
 const defaultUserId = '33333333-3333-3333-3333-333333333333';
@@ -141,6 +175,15 @@ const ideaStatusValues: IdeaStatus[] = [
 
 const moderationStateValues: IdeaModerationState[] = ['normal', 'spam', 'merged'];
 const sortModes: IdeaSortMode[] = ['top_voted', 'most_commented', 'newest'];
+const kanbanColumns: { status: IdeaStatus; label: string; color: string }[] = [
+  { status: 'new', label: 'New', color: '#6366f1' },
+  { status: 'under_review', label: 'Under Review', color: '#f59e0b' },
+  { status: 'accepted', label: 'Accepted', color: '#10b981' },
+  { status: 'planned', label: 'Planned', color: '#2a78b7' },
+  { status: 'in_progress', label: 'In Progress', color: '#3b82f6' },
+  { status: 'completed', label: 'Completed', color: '#22c55e' },
+  { status: 'declined', label: 'Declined', color: '#ef4444' },
+];
 
 const statusLabel: Record<IdeaStatus, string> = {
   new: 'New',
@@ -239,6 +282,54 @@ function buildHealthUrl(apiBase: string): string | null {
   }
 }
 
+function moveIdeaToKanbanPosition(
+  items: Idea[],
+  ideaId: string,
+  target: KanbanDropTarget,
+  overrides: Partial<Idea> = {},
+): Idea[] {
+  const movingIdea = items.find((idea) => idea.id === ideaId);
+  if (!movingIdea) {
+    return items;
+  }
+
+  const remainingIdeas = items.filter((idea) => idea.id !== ideaId);
+  const destinationIdeas = remainingIdeas.filter((idea) => idea.status === target.status);
+  const clampedIndex = Math.max(0, Math.min(target.index, destinationIdeas.length));
+  const movedIdea: Idea = {
+    ...movingIdea,
+    ...overrides,
+    status: target.status,
+  };
+
+  if (destinationIdeas.length === 0) {
+    return [...remainingIdeas, movedIdea];
+  }
+
+  if (clampedIndex >= destinationIdeas.length) {
+    const lastDestinationIdeaId = destinationIdeas[destinationIdeas.length - 1]?.id;
+    const insertionIndex = lastDestinationIdeaId
+      ? remainingIdeas.findIndex((idea) => idea.id === lastDestinationIdeaId) + 1
+      : remainingIdeas.length;
+    return [
+      ...remainingIdeas.slice(0, insertionIndex),
+      movedIdea,
+      ...remainingIdeas.slice(insertionIndex),
+    ];
+  }
+
+  const nextDestinationIdeaId = destinationIdeas[clampedIndex]?.id;
+  const insertionIndex = nextDestinationIdeaId
+    ? remainingIdeas.findIndex((idea) => idea.id === nextDestinationIdeaId)
+    : remainingIdeas.length;
+
+  return [
+    ...remainingIdeas.slice(0, insertionIndex),
+    movedIdea,
+    ...remainingIdeas.slice(insertionIndex),
+  ];
+}
+
 function formatRoleLabel(role: Role): string {
   return role
     .split('_')
@@ -314,7 +405,8 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
 
   const [commentBody, setCommentBody] = useState('');
   const [commentBusy, setCommentBusy] = useState(false);
-  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusBusyIdeaId, setStatusBusyIdeaId] = useState<string | null>(null);
+  const [kanbanDrag, setKanbanDrag] = useState<KanbanDragState | null>(null);
 
   const [categoryName, setCategoryName] = useState('');
   const [categoryColorHex, setCategoryColorHex] = useState('#4E84C4');
@@ -361,6 +453,20 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
     checkedAt: null,
   });
 
+  const kanbanCardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const kanbanColumnBodyRefs = useRef<Record<IdeaStatus, HTMLDivElement | null>>({
+    new: null,
+    under_review: null,
+    accepted: null,
+    planned: null,
+    in_progress: null,
+    completed: null,
+    declined: null,
+  });
+  const kanbanDragIntentRef = useRef<KanbanDragIntent | null>(null);
+  const kanbanDragRef = useRef<KanbanDragState | null>(null);
+  const suppressKanbanClickRef = useRef(false);
+
   const baseUrl = useMemo(() => apiBase.replace(/\/+$/, ''), [apiBase]);
   const headers = useMemo(() => (session ? requestHeaders(session) : null), [session]);
   const routeBoardSlug = useMemo(() => getBoardSlugFromPath(path), [path]);
@@ -375,6 +481,12 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
     () => ideas.find((idea) => idea.id === selectedIdeaId) ?? null,
     [ideas, selectedIdeaId],
   );
+
+  const draggedIdea = useMemo(
+    () => (kanbanDrag ? ideas.find((idea) => idea.id === kanbanDrag.ideaId) ?? null : null),
+    [ideas, kanbanDrag],
+  );
+  kanbanDragRef.current = kanbanDrag;
 
   const selectedAnalyticsIdea = useMemo(
     () => analyticsItems.find((item) => item.ideaId === selectedAnalyticsIdeaId) ?? null,
@@ -420,6 +532,18 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
   );
 
   const canManageStatus = session ? rolesThatCanManageStatus.has(session.role) : false;
+
+  const ideasByStatus = useMemo(() => {
+    const map = new Map<IdeaStatus, Idea[]>();
+    for (const col of kanbanColumns) {
+      map.set(col.status, []);
+    }
+    for (const idea of ideas) {
+      const bucket = map.get(idea.status);
+      if (bucket) bucket.push(idea);
+    }
+    return map;
+  }, [ideas]);
 
   const isModerationEnabled = session
     ? isRoleAllowed(session.role, ['tenant_admin', 'workspace_admin', 'product_manager', 'engineering_manager'])
@@ -1066,41 +1190,255 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
     [apiRequest, commentBody, loadComments, loadIdeas, selectedBoardId, selectedIdeaId, session],
   );
 
-  const onUpdateStatus = useCallback(
-    async (status: IdeaStatus) => {
-      if (!session || !selectedBoardId || !selectedIdea) return;
+  const onUpdateIdeaStatus = useCallback(
+    async (ideaId: string, status: IdeaStatus, targetIndex?: number) => {
+      if (!session || !selectedBoardId) return;
 
-      setStatusBusy(true);
+      const currentIdea = ideas.find((idea) => idea.id === ideaId);
+      if (!currentIdea) return;
+
+      const destinationSize = (ideasByStatus.get(status) ?? []).filter((idea) => idea.id !== ideaId).length;
+      const nextTarget: KanbanDropTarget = {
+        status,
+        index: Math.max(0, Math.min(targetIndex ?? destinationSize, destinationSize)),
+      };
+      const isSamePosition = currentIdea.status === status
+        && nextTarget.index === (ideasByStatus.get(currentIdea.status) ?? []).findIndex((idea) => idea.id === ideaId);
+
+      if (isSamePosition) return;
+
+      const previousIdeas = ideas;
+      const optimisticUpdatedAt = new Date().toISOString();
+      const shouldKeepInView = ideaStatusFilter === 'all' || status === ideaStatusFilter;
+
+      setStatusBusyIdeaId(ideaId);
       setIdeasError(null);
+
+      setIdeas((current) => {
+        if (!shouldKeepInView) {
+          return current.filter((idea) => idea.id !== ideaId);
+        }
+
+        return moveIdeaToKanbanPosition(current, ideaId, nextTarget, {
+          updatedAt: optimisticUpdatedAt,
+        });
+      });
+
       try {
         const updated = await apiRequest<Idea>(
-          `/workspaces/${session.workspaceId}/boards/${selectedBoardId}/ideas/${selectedIdea.id}/status`,
+          `/workspaces/${session.workspaceId}/boards/${selectedBoardId}/ideas/${ideaId}/status`,
           {
             method: 'PATCH',
             body: JSON.stringify({ status }),
           },
         );
 
-        setIdeas((current) =>
-          current.map((idea) =>
-            idea.id === updated.id
-              ? {
-                ...idea,
-                status: updated.status,
-                moderationState: updated.moderationState,
-              }
-              : idea,
-          ),
-        );
+        setIdeas((current) => {
+          const shouldKeepUpdatedIdea = ideaStatusFilter === 'all' || updated.status === ideaStatusFilter;
+          if (!shouldKeepUpdatedIdea) {
+            return current.filter((idea) => idea.id !== updated.id);
+          }
+
+          return moveIdeaToKanbanPosition(current, updated.id, nextTarget, updated);
+        });
       } catch (error) {
         if (error instanceof Error && error.message === 'unauthorized') return;
+        setIdeas(previousIdeas);
         setIdeasError(error instanceof Error ? error.message : 'status_update_failed');
       } finally {
-        setStatusBusy(false);
+        setStatusBusyIdeaId((current) => (current === ideaId ? null : current));
       }
     },
-    [apiRequest, selectedBoardId, selectedIdea, session],
+    [apiRequest, ideaStatusFilter, ideas, ideasByStatus, selectedBoardId, session],
   );
+
+  const onUpdateStatus = useCallback(
+    async (status: IdeaStatus) => {
+      if (!selectedIdea) return;
+      await onUpdateIdeaStatus(selectedIdea.id, status);
+    },
+    [onUpdateIdeaStatus, selectedIdea],
+  );
+
+  const getKanbanDropTarget = useCallback(
+    (clientX: number, clientY: number, draggedIdeaId: string, fallback: KanbanDropTarget): KanbanDropTarget => {
+      let hoveredStatus: IdeaStatus | null = null;
+
+      for (const column of kanbanColumns) {
+        const columnBody = kanbanColumnBodyRefs.current[column.status];
+        if (!columnBody) continue;
+
+        const rect = columnBody.getBoundingClientRect();
+        if (
+          clientX >= rect.left
+          && clientX <= rect.right
+          && clientY >= rect.top
+          && clientY <= rect.bottom
+        ) {
+          hoveredStatus = column.status;
+          break;
+        }
+      }
+
+      const targetStatus = hoveredStatus ?? fallback.status;
+      const destinationIdeas = (ideasByStatus.get(targetStatus) ?? []).filter((idea) => idea.id !== draggedIdeaId);
+
+      for (let index = 0; index < destinationIdeas.length; index += 1) {
+        const destinationIdea = destinationIdeas[index];
+        const cardElement = destinationIdea ? kanbanCardRefs.current[destinationIdea.id] : null;
+        if (!cardElement) continue;
+
+        const rect = cardElement.getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+          return { status: targetStatus, index };
+        }
+      }
+
+      return { status: targetStatus, index: destinationIdeas.length };
+    },
+    [ideasByStatus, kanbanColumns],
+  );
+
+  const onKanbanCardPointerDown = useCallback(
+    (event: PointerEvent<HTMLButtonElement>, idea: Idea) => {
+      if (!canManageStatus || statusBusyIdeaId || event.button !== 0) return;
+
+      const rect = event.currentTarget.getBoundingClientRect();
+      const sourceIndex = (ideasByStatus.get(idea.status) ?? []).findIndex((item) => item.id === idea.id);
+
+      kanbanDragIntentRef.current = {
+        ideaId: idea.id,
+        sourceStatus: idea.status,
+        sourceIndex: Math.max(sourceIndex, 0),
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+
+      event.preventDefault();
+    },
+    [canManageStatus, ideasByStatus, statusBusyIdeaId],
+  );
+
+  const onKanbanCardClick = useCallback((ideaId: string) => {
+    if (suppressKanbanClickRef.current) {
+      suppressKanbanClickRef.current = false;
+      return;
+    }
+
+    setSelectedIdeaId(ideaId);
+  }, []);
+
+  useEffect(() => {
+    if (!canManageStatus) return;
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const dragIntent = kanbanDragIntentRef.current;
+      if (!dragIntent || event.pointerId !== dragIntent.pointerId) return;
+      const currentDrag = kanbanDragRef.current;
+
+      if (!currentDrag) {
+        const movement = Math.hypot(event.clientX - dragIntent.startX, event.clientY - dragIntent.startY);
+        if (movement < kanbanDragStartThreshold) {
+          return;
+        }
+
+        suppressKanbanClickRef.current = true;
+        const initialTarget = getKanbanDropTarget(event.clientX, event.clientY, dragIntent.ideaId, {
+          status: dragIntent.sourceStatus,
+          index: dragIntent.sourceIndex,
+        });
+
+        setKanbanDrag({
+          ideaId: dragIntent.ideaId,
+          sourceStatus: dragIntent.sourceStatus,
+          sourceIndex: dragIntent.sourceIndex,
+          pointerId: dragIntent.pointerId,
+          offsetX: dragIntent.offsetX,
+          offsetY: dragIntent.offsetY,
+          width: dragIntent.width,
+          height: dragIntent.height,
+          pointerX: event.clientX,
+          pointerY: event.clientY,
+          target: initialTarget,
+        });
+        return;
+      }
+
+      if (event.pointerId !== currentDrag.pointerId) return;
+
+      const nextTarget = getKanbanDropTarget(
+        event.clientX,
+        event.clientY,
+        currentDrag.ideaId,
+        currentDrag.target,
+      );
+
+      setKanbanDrag((current) => {
+        if (!current || current.pointerId !== event.pointerId) return current;
+        return {
+          ...current,
+          pointerX: event.clientX,
+          pointerY: event.clientY,
+          target: nextTarget,
+        };
+      });
+    };
+
+    const handlePointerUp = (event: globalThis.PointerEvent) => {
+      const dragIntent = kanbanDragIntentRef.current;
+      if (!dragIntent || event.pointerId !== dragIntent.pointerId) return;
+      const currentDrag = kanbanDragRef.current;
+
+      kanbanDragIntentRef.current = null;
+
+      if (!currentDrag || event.pointerId !== currentDrag.pointerId) {
+        setKanbanDrag(null);
+        return;
+      }
+
+      const finalTarget = getKanbanDropTarget(
+        event.clientX,
+        event.clientY,
+        currentDrag.ideaId,
+        currentDrag.target,
+      );
+      const droppedInPlace = finalTarget.status === currentDrag.sourceStatus
+        && finalTarget.index === currentDrag.sourceIndex;
+
+      setKanbanDrag(null);
+      window.requestAnimationFrame(() => {
+        suppressKanbanClickRef.current = false;
+      });
+
+      if (droppedInPlace) {
+        return;
+      }
+
+      void onUpdateIdeaStatus(currentDrag.ideaId, finalTarget.status, finalTarget.index);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [canManageStatus, getKanbanDropTarget, onUpdateIdeaStatus]);
+
+  useEffect(() => {
+    document.body.classList.toggle('kanban-drag-active', Boolean(kanbanDrag));
+    return () => {
+      document.body.classList.remove('kanban-drag-active');
+    };
+  }, [kanbanDrag]);
 
   const runModerationBulk = useCallback(
     async (action: 'mark_spam' | 'restore' | 'lock_comments' | 'unlock_comments') => {
@@ -1266,31 +1604,6 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
       setAnalyticsError(error instanceof Error ? error.message : 'analytics_export_failed');
     }
   }, [analyticsSegmentFilter, analyticsStatusFilter, apiRequest, selectedBoardId, session]);
-
-
-  /* ── group ideas by status for Kanban columns ── */
-  const kanbanColumns: { status: IdeaStatus; label: string; color: string }[] = [
-    { status: 'new', label: 'New', color: '#6366f1' },
-    { status: 'under_review', label: 'Under Review', color: '#f59e0b' },
-    { status: 'accepted', label: 'Accepted', color: '#10b981' },
-    { status: 'planned', label: 'Planned', color: '#2a78b7' },
-    { status: 'in_progress', label: 'In Progress', color: '#3b82f6' },
-    { status: 'completed', label: 'Completed', color: '#22c55e' },
-    { status: 'declined', label: 'Declined', color: '#ef4444' },
-  ];
-
-  const ideasByStatus = useMemo(() => {
-    const map = new Map<IdeaStatus, Idea[]>();
-    for (const col of kanbanColumns) {
-      map.set(col.status, []);
-    }
-    for (const idea of ideas) {
-      const bucket = map.get(idea.status);
-      if (bucket) bucket.push(idea);
-    }
-    return map;
-  }, [ideas]);
-
   /* ── public portal status filter tabs ── */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _publicStatusTabs: { value: 'all' | IdeaStatus; label: string }[] = [
@@ -1353,7 +1666,7 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
               {canManageStatus ? (
                 <select
                   value={selectedIdea.status}
-                  disabled={statusBusy}
+                  disabled={statusBusyIdeaId === selectedIdea.id}
                   onChange={(event) => void onUpdateStatus(event.target.value as IdeaStatus)}
                 >
                   {ideaStatusValues.map((s) => (
@@ -1392,6 +1705,25 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
             </form>
           </div>
         </aside>
+      </>
+    );
+  }
+
+  function renderKanbanCardContent(idea: Idea): JSX.Element {
+    return (
+      <>
+        <span className="kanban-card-title">{idea.title}</span>
+        <div className="kanban-card-meta">
+          <span className="kanban-card-vote">▲ {idea.voteCount} / ${idea.impactScore || 0}</span>
+          <span className="kanban-card-comments">💬 {idea.commentCount}</span>
+        </div>
+        {idea.categoryNames.length > 0 ? (
+          <div className="pill-row">
+            {idea.categoryNames.map((cat) => (
+              <span className="category-pill" key={`k-${idea.id}-${cat}`}>{cat}</span>
+            ))}
+          </div>
+        ) : null}
       </>
     );
   }
@@ -1613,6 +1945,10 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
               </div>
             </div>
 
+            {selectedBoard && canManageStatus ? (
+              <p className="kanban-helper">Drag cards across columns to update status instantly. The detail panel selector still works for precise changes.</p>
+            ) : null}
+
             {ideasLoading ? <p className="empty">Loading ideas…</p> : null}
 
             {!selectedBoard ? (
@@ -1624,41 +1960,82 @@ export function PortalApp({ path, onNavigate }: PortalAppProps): JSX.Element {
               <div className="kanban-board">
                 {kanbanColumns.map((col) => {
                   const columnIdeas = ideasByStatus.get(col.status) ?? [];
+                  const placeholderTarget = kanbanDrag?.target.status === col.status ? kanbanDrag.target : null;
+                  const visibleIdeas = columnIdeas.filter((idea) => idea.id !== kanbanDrag?.ideaId);
+                  const isSourceColumn = kanbanDrag?.sourceStatus === col.status;
+                  const isDropTarget = Boolean(placeholderTarget);
+                  const placeholderHeight = Math.max(kanbanDrag?.height ?? 0, 96);
                   return (
-                    <div className="kanban-column" key={col.status}>
+                    <div
+                      className={`kanban-column ${isSourceColumn ? 'drag-source' : ''} ${isDropTarget ? 'drag-over' : ''}`}
+                      key={col.status}
+                      data-kanban-status={col.status}
+                    >
                       <div className="kanban-column-header">
                         <span className="kanban-column-dot" style={{ background: col.color }} />
                         <span className="kanban-column-title">{col.label}</span>
                         <span className="kanban-column-count">{columnIdeas.length}</span>
                       </div>
-                      <div className="kanban-column-body">
-                        {columnIdeas.map((idea) => (
-                          <button
-                            key={idea.id}
-                            className={`kanban-card ${selectedIdeaId === idea.id ? 'active' : ''}`}
-                            onClick={() => setSelectedIdeaId(idea.id)}
-                          >
-                            <span className="kanban-card-title">{idea.title}</span>
-                            <div className="kanban-card-meta">
-                              <span className="kanban-card-vote">▲ {idea.voteCount} / ${idea.impactScore || 0}</span>
-                              <span className="kanban-card-comments">💬 {idea.commentCount}</span>
-                            </div>
-                            {idea.categoryNames.length > 0 ? (
-                              <div className="pill-row">
-                                {idea.categoryNames.map((cat) => (
-                                  <span className="category-pill" key={`k-${idea.id}-${cat}`}>{cat}</span>
-                                ))}
+                      <div
+                        className="kanban-column-body"
+                        ref={(element) => {
+                          kanbanColumnBodyRefs.current[col.status] = element;
+                        }}
+                      >
+                        {visibleIdeas.map((idea, index) => (
+                          <Fragment key={idea.id}>
+                            {placeholderTarget?.index === index ? (
+                              <div
+                                className="kanban-card-placeholder"
+                                style={{ height: `${placeholderHeight}px` }}
+                              >
+                                <span>Drop here</span>
                               </div>
                             ) : null}
-                          </button>
+                            <button
+                              ref={(element) => {
+                                kanbanCardRefs.current[idea.id] = element;
+                              }}
+                              type="button"
+                              data-idea-id={idea.id}
+                              className={`kanban-card ${selectedIdeaId === idea.id ? 'active' : ''} ${statusBusyIdeaId === idea.id ? 'is-pending' : ''}`}
+                              onClick={() => onKanbanCardClick(idea.id)}
+                              onPointerDown={(event) => onKanbanCardPointerDown(event, idea)}
+                              aria-grabbed={kanbanDrag?.ideaId === idea.id}
+                            >
+                              {renderKanbanCardContent(idea)}
+                            </button>
+                          </Fragment>
                         ))}
-                        {columnIdeas.length === 0 ? <p className="empty" style={{ padding: '12px', textAlign: 'center' }}>No ideas</p> : null}
+                        {placeholderTarget?.index === visibleIdeas.length ? (
+                          <div
+                            className="kanban-card-placeholder"
+                            style={{ height: `${placeholderHeight}px` }}
+                          >
+                            <span>Drop here</span>
+                          </div>
+                        ) : null}
+                        {visibleIdeas.length === 0 && !placeholderTarget ? <p className="empty" style={{ padding: '12px', textAlign: 'center' }}>No ideas</p> : null}
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
+            {draggedIdea && kanbanDrag ? (
+              <div
+                className="kanban-drag-preview"
+                style={{
+                  width: `${kanbanDrag.width}px`,
+                  transform: `translate3d(${kanbanDrag.pointerX - kanbanDrag.offsetX}px, ${kanbanDrag.pointerY - kanbanDrag.offsetY}px, 0)`,
+                }}
+              >
+                <div className="kanban-card is-preview">
+                  {renderKanbanCardContent(draggedIdea)}
+                </div>
+              </div>
+            ) : null}
 
             {/* Submit idea form */}
             {selectedBoard ? (

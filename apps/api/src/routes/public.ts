@@ -303,6 +303,7 @@ publicRouter.get(
             limit: parsed.data.limit ?? 20,
             offset: parsed.data.offset ?? 0,
             viewerId: visitorId,
+            excludeInternalComments: true,
         });
 
         res.status(200).json({ items });
@@ -334,6 +335,7 @@ publicRouter.get(
             boardId: board.id,
             ideaId,
             viewerId: visitorId,
+            excludeInternalComments: true,
         });
 
         if (!idea) {
@@ -636,7 +638,9 @@ publicRouter.post(
                     isInternal: parsed.data.isInternal ?? false,
                 });
 
-            broadcast(board.id, 'comment.created', { ideaId, comment });
+            if (!comment.isInternal) {
+                broadcast(board.id, 'comment.created', { ideaId, comment });
+            }
             res.status(201).json(comment);
         } catch (err) {
             if (err instanceof Error && err.message === 'idea_comments_locked') {

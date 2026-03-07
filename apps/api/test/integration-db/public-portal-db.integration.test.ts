@@ -236,6 +236,76 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
         expect(changelogRes.body.items[0].title).toBe('Test Release');
     });
 
+    it('hides internal-only comments from public counts and detail payloads', async () => {
+        const registerResponse = await request(app)
+            .post('/api/v1/public/auth/register')
+            .send({
+                email: 'internal-operator@test.com',
+                password: 'Password123!',
+                displayName: 'Internal Operator'
+            });
+
+        expect(registerResponse.status).toBe(201);
+        const token = registerResponse.body.token as string;
+        const portalUserId = registerResponse.body.user.id as string;
+
+        await query(
+            `
+              INSERT INTO users (id, email, display_name)
+              VALUES ($1, $2, 'Internal Operator')
+              ON CONFLICT (id) DO NOTHING
+            `,
+            [portalUserId, 'internal-operator@test.com'],
+        );
+
+        await query(
+            `
+              INSERT INTO workspace_memberships (workspace_id, user_id, role, active, invited_by)
+              VALUES ($1, $2, 'product_manager', TRUE, $3)
+              ON CONFLICT (workspace_id, user_id) DO NOTHING
+            `,
+            [WORKSPACE_ID, portalUserId, ADMIN_ID],
+        );
+
+        const submitResponse = await request(app)
+            .post(`/api/v1/public/boards/${boardSlug}/ideas`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+                title: 'Internal Notes Visibility Check',
+                description: 'Ensure internal comments stay out of public counts and payloads.'
+            });
+
+        expect(submitResponse.status).toBe(201);
+        const ideaId = submitResponse.body.id as string;
+
+        const internalCommentResponse = await request(app)
+            .post(`/api/v1/public/boards/${boardSlug}/ideas/${ideaId}/comments`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+                body: 'Internal triage note',
+                isInternal: true,
+            });
+
+        expect(internalCommentResponse.status).toBe(201);
+        expect(internalCommentResponse.body.isInternal).toBe(true);
+
+        const detailResponse = await request(app)
+            .get(`/api/v1/public/boards/${boardSlug}/ideas/${ideaId}?threaded=true`)
+            .set('Authorization', `Bearer ${token}`);
+
+        expect(detailResponse.status).toBe(200);
+        expect(detailResponse.body.idea.commentCount).toBe(0);
+        expect(detailResponse.body.comments).toHaveLength(0);
+
+        const ideasResponse = await request(app)
+            .get(`/api/v1/public/boards/${boardSlug}/ideas`)
+            .set('Authorization', `Bearer ${token}`);
+
+        expect(ideasResponse.status).toBe(200);
+        const listedIdea = ideasResponse.body.items.find((item: { id: string }) => item.id === ideaId) as { commentCount: number } | undefined;
+        expect(listedIdea?.commentCount).toBe(0);
+    });
+
     it('enforces domain-restricted access on public content routes', async () => {
         const updateSettingsResponse = await request(app)
             .patch(`/api/v1/workspaces/${WORKSPACE_ID}/boards/${boardId}/settings`)
