@@ -2,6 +2,9 @@ import { loadLocalEnv } from './lib/load-env.js';
 
 loadLocalEnv();
 
+const { shutdownObservability, startObservability } = await import('./lib/observability.js');
+await startObservability();
+
 const [{ createApp }, { closePool }, { runBootstrapSeed }, { runMigrations }] =
   await Promise.all([
     import('./app.js'),
@@ -23,6 +26,7 @@ async function bootstrap(): Promise<void> {
 
   const shutdown = async () => {
     server.close();
+    await shutdownObservability();
     await closePool();
     process.exit(0);
   };
@@ -33,5 +37,7 @@ async function bootstrap(): Promise<void> {
 
 bootstrap().catch((error: Error) => {
   console.error('[bootstrap] failed to start api', error);
-  process.exit(1);
+  void shutdownObservability().finally(() => {
+    process.exit(1);
+  });
 });

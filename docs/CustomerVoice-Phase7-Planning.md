@@ -163,6 +163,7 @@ Required changes:
 - E2E coverage for personal-tenant signup with public email providers.
 - Regression coverage for guest access into enterprise tenants.
 - Release checklist for session invalidation, redirect readiness, and post-cutover cleanup.
+  - Implemented in `docs/CustomerVoice-Phase7-Cutover-Runbook.md` with the matching automated audit in `apps/api/src/db/phase7-cutover-audit-cli.ts`.
 
 ## 5. Concrete Schema Changes
 

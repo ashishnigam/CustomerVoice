@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -11,6 +11,11 @@ interface Board {
     id: string;
     name: string;
     slug: string;
+    tenantId: string;
+    tenantKey: string | null;
+    publicBoardKey: string;
+    canonicalPath?: string;
+    legacyPath?: string;
     description: string | null;
     visibility: 'public' | 'private';
     _accessRestricted?: boolean;
@@ -111,6 +116,24 @@ interface PortalUser {
     avatarUrl: string | null;
 }
 
+interface PortalAuthResponse {
+    user: PortalUser;
+    tenant: {
+        tenantId: string;
+        tenantKey: string | null;
+        tenantType: 'enterprise' | 'personal' | null;
+        tenantName: string | null;
+        accountType: 'personal_owner' | 'enterprise_member' | 'guest' | null;
+        workspaceId: string | null;
+    } | null;
+}
+
+interface PortalRouteContext {
+    tenantKey: string | null;
+    boardPublicKey: string | null;
+    legacySlug: string | null;
+}
+
 interface CustomerPortalProps {
     path: string;
     onNavigate: (path: string) => void;
@@ -126,6 +149,8 @@ interface CommentCreatePayload {
 const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 const portalTokenStorageKey = 'cv_portal_token';
 const portalPostAuthPathStorageKey = 'cv_portal_post_auth_path';
+const tenantVisitorTokenHeader = 'x-tenant-visitor-token';
+const tenantVisitorTenantHeader = 'x-tenant-visitor-tenant';
 
 function isAuthCallbackPath(path: string): boolean {
     return path === '/portal/callback' || path === '/portal/auth/callback';
@@ -148,6 +173,16 @@ function getOrCreateVisitorId(): string {
         localStorage.setItem(key, id);
     }
     return id;
+}
+
+function getTenantVisitorStorageKey(tenantKey: string | null, legacySlug: string | null): string {
+    if (tenantKey) {
+        return `cv_tenant_visitor_token:${tenantKey}`;
+    }
+    if (legacySlug) {
+        return `cv_tenant_visitor_token:legacy:${legacySlug}`;
+    }
+    return 'cv_tenant_visitor_token:default';
 }
 
 const statusConfig: Record<IdeaStatus, { label: string; color: string; icon: string }> = {
@@ -211,9 +246,40 @@ function getSlugFromPath(path: string): string | null {
     return match ? decodeURIComponent(match[1]) : null;
 }
 
+function getTenantRouteFromPath(path: string): PortalRouteContext {
+    const canonicalMatch = path.match(/^\/portal\/t\/([^/?#]+)\/boards\/([^/?#]+)/);
+    if (canonicalMatch) {
+        return {
+            tenantKey: decodeURIComponent(canonicalMatch[1]),
+            boardPublicKey: decodeURIComponent(canonicalMatch[2]),
+            legacySlug: null,
+        };
+    }
+
+    return {
+        tenantKey: null,
+        boardPublicKey: null,
+        legacySlug: getSlugFromPath(path),
+    };
+}
+
 function getIdeaIdFromPath(path: string): string | null {
+    const canonicalMatch = path.match(/^\/portal\/t\/[^/?#]+\/boards\/[^/?#]+\/ideas\/([^/?#]+)/);
+    if (canonicalMatch) {
+        return decodeURIComponent(canonicalMatch[1]);
+    }
+
     const match = path.match(/^\/portal\/boards\/[^/?#]+\/ideas\/([^/?#]+)/);
     return match ? decodeURIComponent(match[1]) : null;
+}
+
+function buildPortalBoardPath(params: {
+    tenantKey: string;
+    boardPublicKey: string;
+    ideaId?: string | null;
+}): string {
+    const base = `/portal/t/${encodeURIComponent(params.tenantKey)}/boards/${encodeURIComponent(params.boardPublicKey)}`;
+    return params.ideaId ? `${base}/ideas/${encodeURIComponent(params.ideaId)}` : base;
 }
 
 const defaultSettings: BoardSettings = {
@@ -237,12 +303,29 @@ const defaultSettings: BoardSettings = {
 /* ── Component ── */
 export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     const visitorId = useMemo(() => getOrCreateVisitorId(), []);
-    const boardSlug = useMemo(() => getSlugFromPath(path), [path]);
+    const routeContext = useMemo(() => getTenantRouteFromPath(path), [path]);
+    const boardSlug = routeContext.legacySlug;
+    const boardPublicKey = routeContext.boardPublicKey;
+    const tenantKey = routeContext.tenantKey;
+    const tenantVisitorStorageKey = useMemo(
+        () => getTenantVisitorStorageKey(routeContext.tenantKey, routeContext.legacySlug),
+        [routeContext.legacySlug, routeContext.tenantKey],
+    );
     const deepLinkIdeaId = useMemo(() => getIdeaIdFromPath(path), [path]);
+    const boardApiBase = useMemo(() => {
+        if (tenantKey && boardPublicKey) {
+            return `${apiBase}/public/t/${encodeURIComponent(tenantKey)}/boards/${encodeURIComponent(boardPublicKey)}`;
+        }
+        if (boardSlug) {
+            return `${apiBase}/public/boards/${encodeURIComponent(boardSlug)}`;
+        }
+        return null;
+    }, [boardPublicKey, boardSlug, tenantKey]);
 
     /* ── Auth State ── */
     const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
     const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem(portalTokenStorageKey));
+    const [tenantVisitorToken, setTenantVisitorToken] = useState<string | null>(() => localStorage.getItem(tenantVisitorStorageKey));
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password'>('login');
     const [authEmail, setAuthEmail] = useState('');
@@ -256,6 +339,10 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     const [callbackError, setCallbackError] = useState<string | null>(null);
     const [ssoDomainInput, setSsoDomainInput] = useState('');
     const [ssoError, setSsoError] = useState<string | null>(null);
+    const tenantVisitorTokenRef = useRef<string | null>(tenantVisitorToken);
+    const tenantVisitorStorageKeyRef = useRef(tenantVisitorStorageKey);
+    const routeContextRef = useRef(routeContext);
+    const boardTenantKeyRef = useRef<string | null>(null);
 
     /* ── Password Reset ── */
     const [resetToken, setResetToken] = useState<string | null>(null);
@@ -361,6 +448,64 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     const [showShareMenu, setShowShareMenu] = useState<string | null>(null);
     const [shareNotice, setShareNotice] = useState<string | null>(null);
 
+    useEffect(() => {
+        tenantVisitorTokenRef.current = tenantVisitorToken;
+    }, [tenantVisitorToken]);
+
+    useEffect(() => {
+        tenantVisitorStorageKeyRef.current = tenantVisitorStorageKey;
+    }, [tenantVisitorStorageKey]);
+
+    useEffect(() => {
+        routeContextRef.current = routeContext;
+    }, [routeContext]);
+
+    useEffect(() => {
+        boardTenantKeyRef.current = board?.tenantKey ?? null;
+    }, [board?.tenantKey]);
+
+    const rememberTenantVisitorSession = useCallback((response: Response) => {
+        if (!response.headers.has(tenantVisitorTokenHeader)) {
+            return;
+        }
+
+        const nextToken = response.headers.get(tenantVisitorTokenHeader) ?? '';
+        const currentRouteContext = routeContextRef.current;
+        const resolvedTenantKey =
+            response.headers.get(tenantVisitorTenantHeader) ??
+            boardTenantKeyRef.current ??
+            currentRouteContext.tenantKey;
+        const resolvedStorageKey = getTenantVisitorStorageKey(resolvedTenantKey, currentRouteContext.legacySlug);
+
+        if (nextToken.trim().length === 0) {
+            localStorage.removeItem(tenantVisitorStorageKeyRef.current);
+            localStorage.removeItem(resolvedStorageKey);
+            setTenantVisitorToken(null);
+            return;
+        }
+
+        localStorage.setItem(resolvedStorageKey, nextToken);
+        setTenantVisitorToken(nextToken);
+    }, []);
+
+    const portalFetch = useCallback(async (input: string, init: RequestInit = {}) => {
+        const headers = new Headers(init.headers ?? undefined);
+        if (!headers.has('x-visitor-id')) {
+            headers.set('x-visitor-id', visitorId);
+        }
+        const currentTenantVisitorToken = tenantVisitorTokenRef.current;
+        if (currentTenantVisitorToken && !headers.has(tenantVisitorTokenHeader)) {
+            headers.set(tenantVisitorTokenHeader, currentTenantVisitorToken);
+        }
+
+        const response = await fetch(input, {
+            ...init,
+            headers,
+        });
+        rememberTenantVisitorSession(response);
+        return response;
+    }, [rememberTenantVisitorSession, visitorId]);
+
     const authHeaders = useMemo(() => {
         const h: Record<string, string> = {
             'Content-Type': 'application/json',
@@ -389,11 +534,11 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
     const loadCurrentUser = useCallback(async (token: string) => {
         try {
-            const res = await fetch(`${apiBase}/public/auth/me`, {
+            const res = await portalFetch(`${apiBase}/public/auth/me`, {
                 headers: { authorization: `Bearer ${token}` },
             });
             if (res.ok) {
-                const data = await res.json() as { user: PortalUser };
+                const data = await res.json() as PortalAuthResponse;
                 setPortalUser(data.user);
             } else {
                 localStorage.removeItem(portalTokenStorageKey);
@@ -409,7 +554,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         setResetBusy(true);
         setResetError(null);
         try {
-            const res = await fetch(`${apiBase}/public/auth/reset-password`, {
+            const res = await portalFetch(`${apiBase}/public/auth/reset-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token: resetToken, password: newPassword }),
@@ -425,7 +570,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         } finally {
             setResetBusy(false);
         }
-    }, [resetToken, newPassword]);
+    }, [resetToken, newPassword, portalFetch]);
 
     const handleAuthSubmit = useCallback(async (e: FormEvent) => {
         e.preventDefault();
@@ -435,7 +580,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
         if (authMode === 'forgot-password') {
             try {
-                const res = await fetch(`${apiBase}/public/auth/forgot-password`, {
+                const res = await portalFetch(`${apiBase}/public/auth/forgot-password`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: authEmail }),
@@ -459,12 +604,15 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             email: authEmail,
             password: authPassword,
         };
+        if (board?.tenantKey) {
+            body.tenantKey = board.tenantKey;
+        }
         if (authMode === 'register' && authDisplayName.trim()) {
             body.displayName = authDisplayName.trim();
         }
 
         try {
-            const res = await fetch(`${apiBase}${endpoint}`, {
+            const res = await portalFetch(`${apiBase}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
@@ -477,6 +625,8 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                     setAuthError('This email is already registered. Try signing in instead.');
                 } else if (data.error === 'invalid_credentials') {
                     setAuthError('Invalid email or password.');
+                } else if (data.error === 'tenant_selection_required') {
+                    setAuthError('This account belongs to multiple tenants. Retry from the tenant-specific board link or company login.');
                 } else {
                     setAuthError(data.error ?? 'Authentication failed');
                 }
@@ -503,23 +653,35 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         } finally {
             setAuthBusy(false);
         }
-    }, [authMode, authEmail, authPassword, authDisplayName, pendingAction]);
+    }, [authMode, authEmail, authPassword, authDisplayName, board?.tenantKey, pendingAction, portalFetch]);
 
     const handleSignOut = useCallback(async () => {
         if (authToken) {
-            await fetch(`${apiBase}/public/auth/logout`, {
+            await portalFetch(`${apiBase}/public/auth/logout`, {
                 method: 'POST',
                 headers: { authorization: `Bearer ${authToken}` },
             }).catch(() => { /* ignore */ });
         }
         localStorage.removeItem(portalTokenStorageKey);
         localStorage.removeItem(portalPostAuthPathStorageKey);
+        localStorage.removeItem(tenantVisitorStorageKey);
+        if (board?.tenantKey) {
+            localStorage.removeItem(getTenantVisitorStorageKey(board.tenantKey, null));
+        }
         setAuthToken(null);
         setPortalUser(null);
+        setTenantVisitorToken(null);
         setSsoError(null);
-    }, [authToken]);
+    }, [authToken, board?.tenantKey, portalFetch, tenantVisitorStorageKey]);
 
     const handleSsoSignIn = useCallback(() => {
+        if (board?.tenantKey) {
+            rememberPostAuthPath();
+            setSsoError(null);
+            window.location.href = `${apiBase}/auth/sso/login?tenant=${encodeURIComponent(board.tenantKey)}`;
+            return;
+        }
+
         const domain = parseSsoDomainInput(ssoDomainInput || authEmail);
         if (!domain) {
             setSsoError('Enter your work email or company domain to continue with SSO.');
@@ -529,47 +691,56 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         rememberPostAuthPath();
         setSsoError(null);
         window.location.href = `${apiBase}/auth/sso/login?domain=${encodeURIComponent(domain)}`;
-    }, [authEmail, rememberPostAuthPath, ssoDomainInput]);
+    }, [authEmail, board?.tenantKey, rememberPostAuthPath, ssoDomainInput]);
 
     /* ── Load board & settings ── */
     const loadBoard = useCallback(async () => {
-        if (!boardSlug) return;
+        if (!boardApiBase) return;
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}`, { headers: authHeaders });
+            const res = await portalFetch(boardApiBase, { headers: authHeaders });
             if (!res.ok) throw new Error('Board not found');
             const data = await res.json() as Board;
             setBoard(data);
+            if (routeContext.legacySlug && data.tenantKey && data.publicBoardKey) {
+                const canonicalPath = buildPortalBoardPath({
+                    tenantKey: data.tenantKey,
+                    boardPublicKey: data.publicBoardKey,
+                    ideaId: deepLinkIdeaId,
+                });
+                window.history.replaceState({}, document.title, canonicalPath);
+                window.dispatchEvent(new PopStateEvent('popstate'));
+            }
             setError(null);
         } catch (err) {
             setBoard(null);
             setError(err instanceof Error ? err.message : 'Failed to load board');
         }
-    }, [boardSlug, authHeaders]);
+    }, [authHeaders, boardApiBase, deepLinkIdeaId, routeContext.legacySlug, portalFetch]);
 
     const loadSettings = useCallback(async () => {
-        if (!boardSlug) return;
+        if (!boardApiBase) return;
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/settings`, { headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/settings`, { headers: authHeaders });
             if (res.ok) {
                 const data = await res.json() as BoardSettings;
                 setSettings(data);
             }
         } catch { /* ignore */ }
-    }, [boardSlug, authHeaders]);
+    }, [authHeaders, boardApiBase, portalFetch]);
 
     const loadCategories = useCallback(async () => {
-        if (!boardSlug || !board?.id || board._accessRestricted) return;
+        if (!boardApiBase || !board?.id || board._accessRestricted) return;
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/categories`, { headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/categories`, { headers: authHeaders });
             if (res.ok) {
                 const data = await res.json() as { items: IdeaCategory[] };
                 setCategories(data.items);
             }
         } catch { /* silently fail */ }
-    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders]);
+    }, [authHeaders, board?.id, board?._accessRestricted, boardApiBase, portalFetch]);
 
     const loadIdeas = useCallback(async () => {
-        if (!boardSlug || !board?.id || board._accessRestricted) return;
+        if (!boardApiBase || !board?.id || board._accessRestricted) return;
         setLoading(true);
         setError(null);
         setOffset(0);
@@ -582,7 +753,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             if (categoryFilter !== 'all') params.set('categoryIds', categoryFilter);
             if (search.trim().length > 0) params.set('search', search.trim());
 
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas?${params}`, { headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/ideas?${params}`, { headers: authHeaders });
             if (!res.ok) throw new Error('Failed to load ideas');
             const data = await res.json() as { items: Idea[] };
             setIdeas(data.items);
@@ -592,10 +763,10 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         } finally {
             setLoading(false);
         }
-    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders, sort, statusFilter, categoryFilter, search]);
+    }, [authHeaders, board?.id, board?._accessRestricted, boardApiBase, sort, statusFilter, categoryFilter, search, portalFetch]);
 
     const loadMoreIdeas = useCallback(async () => {
-        if (!boardSlug || !board?.id || board._accessRestricted || loadingMore || !hasMore) return;
+        if (!boardApiBase || !board?.id || board._accessRestricted || loadingMore || !hasMore) return;
         setLoadingMore(true);
         const nextOffset = offset + PAGE_SIZE;
         try {
@@ -607,7 +778,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             if (categoryFilter !== 'all') params.set('categoryIds', categoryFilter);
             if (search.trim().length > 0) params.set('search', search.trim());
 
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas?${params}`, { headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/ideas?${params}`, { headers: authHeaders });
             if (res.ok) {
                 const data = await res.json() as { items: Idea[] };
                 setIdeas((prev) => [...prev, ...data.items]);
@@ -616,15 +787,15 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             }
         } catch { /* ignore */ }
         finally { setLoadingMore(false); }
-    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders, sort, statusFilter, categoryFilter, search, offset, loadingMore, hasMore]);
+    }, [authHeaders, board?.id, board?._accessRestricted, boardApiBase, sort, statusFilter, categoryFilter, search, offset, loadingMore, hasMore, portalFetch]);
 
     /* ── Load idea detail ── */
     const loadIdeaDetail = useCallback(async (ideaId: string, viewMode: 'panel' | 'page' = 'panel') => {
-        if (!boardSlug || !board?.id || board._accessRestricted) return;
+        if (!boardApiBase || !board?.id || board._accessRestricted) return;
         setDetailLoading(true);
         setDetailViewMode(viewMode);
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${ideaId}?threaded=true`, { headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/ideas/${ideaId}?threaded=true`, { headers: authHeaders });
             if (res.ok) {
                 const data = await res.json() as { idea: Idea; comments: IdeaComment[]; isSubscribed?: boolean; isFavorited?: boolean };
                 setSelectedIdea(data.idea);
@@ -634,66 +805,66 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             }
         } catch { /* ignore */ }
         finally { setDetailLoading(false); }
-    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders]);
+    }, [authHeaders, board?.id, board?._accessRestricted, boardApiBase, portalFetch]);
 
     /* ── Load changelog ── */
     const loadChangelog = useCallback(async () => {
-        if (!boardSlug || !board?.id || board._accessRestricted) return;
+        if (!boardApiBase || !board?.id || board._accessRestricted) return;
         setChangelogLoading(true);
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/changelog`, { headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/changelog`, { headers: authHeaders });
             if (res.ok) {
                 const data = await res.json() as { items: ChangelogEntry[] };
                 setChangelog(data.items);
             }
         } catch { /* ignore */ }
         finally { setChangelogLoading(false); }
-    }, [board?.id, board?._accessRestricted, boardSlug, authHeaders]);
+    }, [authHeaders, board?.id, board?._accessRestricted, boardApiBase, portalFetch]);
 
     /* ── Toggle follow/subscribe ── */
     const onToggleFollow = useCallback(async () => {
-        if (!selectedIdea || !boardSlug) return;
+        if (!selectedIdea || !boardApiBase) return;
         if (!portalUser) { requireAuth(() => void onToggleFollow()); return; }
         const method = isSubscribed ? 'DELETE' : 'POST';
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${selectedIdea.id}/subscribe`, { method, headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/ideas/${selectedIdea.id}/subscribe`, { method, headers: authHeaders });
             if (res.ok) setIsSubscribed(!isSubscribed);
         } catch { /* ignore */ }
-    }, [selectedIdea, boardSlug, portalUser, isSubscribed, authHeaders, requireAuth]);
+    }, [selectedIdea, boardApiBase, portalUser, isSubscribed, authHeaders, requireAuth, portalFetch]);
 
     /* ── Toggle favorite ── */
     const onToggleFavorite = useCallback(async (ideaId: string) => {
-        if (!boardSlug) return;
+        if (!boardApiBase) return;
         if (!portalUser) { requireAuth(() => void onToggleFavorite(ideaId)); return; }
         const isFav = favoritedIds.has(ideaId);
         const method = isFav ? 'DELETE' : 'POST';
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${ideaId}/favorite`, { method, headers: authHeaders });
+            const res = await portalFetch(`${boardApiBase}/ideas/${ideaId}/favorite`, { method, headers: authHeaders });
             if (res.ok) {
                 setFavoritedIds((prev) => { const next = new Set(prev); if (isFav) next.delete(ideaId); else next.add(ideaId); return next; });
                 if (selectedIdea?.id === ideaId) setIsFavorited(!isFav);
             }
         } catch { /* ignore */ }
-    }, [boardSlug, portalUser, favoritedIds, selectedIdea, authHeaders, requireAuth]);
+    }, [boardApiBase, portalUser, favoritedIds, selectedIdea, authHeaders, requireAuth, portalFetch]);
 
     /* ── Load user favorites list ── */
     const loadUserFavorites = useCallback(async () => {
         if (!portalUser || !authToken) return;
         try {
-            const res = await fetch(`${apiBase}/public/me/favorites`, { headers: authHeaders });
+            const res = await portalFetch(`${apiBase}/public/me/favorites`, { headers: authHeaders });
             if (res.ok) {
                 const data = await res.json() as { ideaIds: string[] };
                 setFavoritedIds(new Set(data.ideaIds));
             }
         } catch { /* ignore */ }
-    }, [portalUser, authToken, authHeaders]);
+    }, [portalUser, authToken, authHeaders, portalFetch]);
 
     /* ── Toggle vote ── */
     const doToggleVote = useCallback(async (idea: Idea) => {
-        if (!boardSlug) return;
+        if (!boardApiBase) return;
         try {
             const method = idea.viewerHasVoted ? 'DELETE' : 'POST';
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${idea.id}/votes`, {
+            const res = await portalFetch(`${boardApiBase}/ideas/${idea.id}/votes`, {
                 method,
                 headers: authHeaders,
             });
@@ -719,7 +890,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                 }
             }
         } catch { /* ignore */ }
-    }, [boardSlug, authHeaders, selectedIdea, requireAuth]);
+    }, [boardApiBase, authHeaders, selectedIdea, requireAuth, portalFetch]);
 
     const onToggleVote = useCallback((idea: Idea) => {
         if (settings.requireAuthToVote && !portalUser) {
@@ -731,7 +902,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
     /* ── Post Comment ── */
     const onPostComment = useCallback(async () => {
-        if (!boardSlug || !selectedIdea || commentBody.trim().length < 2) return;
+        if (!boardApiBase || !selectedIdea || commentBody.trim().length < 2) return;
 
         const doPost = async () => {
             setCommentBusy(true);
@@ -740,11 +911,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                 const payload: CommentCreatePayload = { body: bodyToSubmit, isInternal };
                 if (replyingTo) payload.parentCommentId = replyingTo.id;
 
-                // NOTE: The instruction provided a different URL and auth scheme.
-                // Assuming `boardSlug` is still the correct identifier for the board.
-                // The instruction also implies `visitorId` is used as a bearer token,
-                // which is unusual for public APIs but followed as per instruction.
-                const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${selectedIdea.id}/comments`, {
+                const res = await portalFetch(`${boardApiBase}/ideas/${selectedIdea.id}/comments`, {
                     method: 'POST',
                     headers: authHeaders,
                     body: JSON.stringify(payload),
@@ -765,7 +932,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                         delete uploadHeaders['Content-Type'];
 
                         try {
-                            await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${selectedIdea.id}/comments/${newComment.id}/attachments`, {
+                            await portalFetch(`${boardApiBase}/ideas/${selectedIdea.id}/comments/${newComment.id}/attachments`, {
                                 method: 'POST',
                                 headers: uploadHeaders,
                                 body: formData,
@@ -796,11 +963,11 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         } else {
             void doPost();
         }
-    }, [boardSlug, selectedIdea, commentBody, replyingTo, detailViewMode, authHeaders, settings.requireAuthToComment, portalUser, requireAuth, loadIdeaDetail]);
+    }, [boardApiBase, selectedIdea, commentBody, replyingTo, detailViewMode, authHeaders, settings.requireAuthToComment, portalUser, requireAuth, loadIdeaDetail, portalFetch]);
 
     /* ── Submit Idea ── */
     const onSubmitIdea = useCallback(async () => {
-        if (!boardSlug || submitTitle.trim().length < 4 || submitDescription.trim().length < 8) return;
+        if (!boardApiBase || submitTitle.trim().length < 4 || submitDescription.trim().length < 8) return;
         setSubmitBusy(true);
         setSubmitError(null);
 
@@ -811,7 +978,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
             };
             if (submitCategory) body.categoryIds = [submitCategory];
 
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas`, {
+            const res = await portalFetch(`${boardApiBase}/ideas`, {
                 method: 'POST',
                 headers: authHeaders,
                 body: JSON.stringify(body),
@@ -837,7 +1004,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                 delete uploadHeaders['Content-Type'];
 
                 try {
-                    await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${newIdea.id}/attachments`, {
+                    await portalFetch(`${boardApiBase}/ideas/${newIdea.id}/attachments`, {
                         method: 'POST',
                         headers: uploadHeaders,
                         body: formData,
@@ -857,11 +1024,11 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         } finally {
             setSubmitBusy(false);
         }
-    }, [boardSlug, submitTitle, submitDescription, submitCategory, authHeaders, requireAuth, loadIdeas]);
+    }, [boardApiBase, submitTitle, submitDescription, submitCategory, authHeaders, requireAuth, loadIdeas, portalFetch]);
 
     /* ── Search for similar ideas (duplicate detection) ── */
     useEffect(() => {
-        if (submitTitle.trim().length < 4 || !boardSlug) {
+        if (submitTitle.trim().length < 4 || !boardApiBase) {
             setSimilarIdeas([]);
             return;
         }
@@ -869,7 +1036,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         const timer = setTimeout(async () => {
             try {
                 const params = new URLSearchParams({ search: submitTitle.trim(), limit: '5' });
-                const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas?${params}`, {
+                const res = await portalFetch(`${boardApiBase}/ideas?${params}`, {
                     headers: authHeaders,
                 });
                 if (res.ok) {
@@ -880,12 +1047,19 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [submitTitle, boardSlug, authHeaders]);
+    }, [submitTitle, boardApiBase, authHeaders, portalFetch]);
 
     /* ── Share helpers ── */
     const getIdeaUrl = useCallback((ideaId: string) => {
-        return `${window.location.origin}/portal/boards/${boardSlug}/ideas/${ideaId}`;
-    }, [boardSlug]);
+        if (board?.tenantKey) {
+            return `${window.location.origin}${buildPortalBoardPath({
+                tenantKey: board.tenantKey,
+                boardPublicKey: board.publicBoardKey,
+                ideaId,
+            })}`;
+        }
+        return `${window.location.origin}/portal/boards/${board?.slug ?? boardSlug ?? ''}/ideas/${ideaId}`;
+    }, [board, boardSlug]);
 
     const onCopyLink = useCallback((ideaId: string) => {
         void navigator.clipboard.writeText(getIdeaUrl(ideaId));
@@ -914,12 +1088,12 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
 
     /* ── Toggle Comment Upvote ── */
     const onToggleCommentUpvote = useCallback(async (comment: IdeaComment) => {
-        if (!boardSlug || !selectedIdea) return;
+        if (!boardApiBase || !selectedIdea) return;
         if (!portalUser) { requireAuth(() => void onToggleCommentUpvote(comment)); return; }
 
         const method = comment.viewerHasUpvoted ? 'DELETE' : 'POST';
         try {
-            const res = await fetch(`${apiBase}/public/boards/${boardSlug}/ideas/${selectedIdea.id}/comments/${comment.id}/upvote`, {
+            const res = await portalFetch(`${boardApiBase}/ideas/${selectedIdea.id}/comments/${comment.id}/upvote`, {
                 method,
                 headers: authHeaders,
             });
@@ -927,9 +1101,21 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                 void loadIdeaDetail(selectedIdea.id, detailViewMode);
             }
         } catch { /* ignore */ }
-    }, [boardSlug, selectedIdea, portalUser, authHeaders, requireAuth, loadIdeaDetail, detailViewMode]);
+    }, [boardApiBase, selectedIdea, portalUser, authHeaders, requireAuth, loadIdeaDetail, detailViewMode, portalFetch]);
 
     /* ── Effects ── */
+    useEffect(() => {
+        setTenantVisitorToken(localStorage.getItem(tenantVisitorStorageKey));
+    }, [tenantVisitorStorageKey]);
+
+    useEffect(() => {
+        if (!board?.tenantKey || !tenantVisitorToken) {
+            return;
+        }
+
+        localStorage.setItem(getTenantVisitorStorageKey(board.tenantKey, null), tenantVisitorToken);
+    }, [board?.tenantKey, tenantVisitorToken]);
+
     useEffect(() => {
         if (authToken) void loadCurrentUser(authToken);
     }, [authToken, loadCurrentUser]);
@@ -951,9 +1137,15 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     }, [loadIdeas]);
 
     useEffect(() => {
-        if (!boardSlug || !board || board._accessRestricted) return;
+        if (!boardApiBase || !board || board._accessRestricted) return;
+        if (settings.accessMode !== 'public' && settings.accessMode !== 'link_only') return;
 
-        const eventSource = new EventSource(`${apiBase}/public/boards/${boardSlug}/stream`);
+        const streamUrl = new URL(`${boardApiBase}/stream`, window.location.origin);
+        if (tenantVisitorToken) {
+            streamUrl.searchParams.set('visitorToken', tenantVisitorToken);
+        }
+
+        const eventSource = new EventSource(streamUrl.toString());
 
         eventSource.addEventListener('idea.voted', (event) => {
             try {
@@ -1022,7 +1214,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
         return () => {
             eventSource.close();
         };
-    }, [apiBase, board, boardSlug, loadIdeas, statusFilter]);
+    }, [boardApiBase, board, loadIdeas, settings.accessMode, statusFilter, tenantVisitorToken]);
 
     useEffect(() => {
         if (deepLinkIdeaId) {
@@ -1086,12 +1278,12 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
     }
 
     /* ── Render: No board slug ── */
-    if (!boardSlug) {
+    if (!boardApiBase) {
         return (
             <div className="cp-shell">
                 <div className="cp-empty-state">
                     <h1>Portal Not Found</h1>
-                    <p>Please navigate to a specific board, e.g. <code>/portal/boards/customervoice-features</code></p>
+                    <p>Please navigate to a specific board, e.g. <code>/portal/t/tnt_customervoicedemo/boards/customervoice-features</code></p>
                 </div>
             </div>
         );
@@ -1152,17 +1344,17 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                         {isDomainRestrictedBoard ? (
                             <button
                                 className="hero-button ghost"
-                                onClick={() => {
-                                    setAuthMode('login');
-                                    setShowAuthModal(true);
-                                }}
+                                onClick={handleSsoSignIn}
                             >
-                                Continue with SSO
+                                Company Login
                             </button>
                         ) : null}
                     </div>
                     {isDomainRestrictedBoard ? (
                         <div style={{ marginTop: '24px', textAlign: 'left' }}>
+                            <p style={{ marginBottom: '12px', color: 'var(--cv-subtle)' }}>
+                                Use your company workspace login to resolve the correct tenant before board access.
+                            </p>
                             <label style={{ display: 'block', fontWeight: 600, marginBottom: '8px' }}>Work Email or Company Domain</label>
                             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                 <input
@@ -1173,7 +1365,7 @@ export function CustomerPortal({ path }: CustomerPortalProps): JSX.Element {
                                     style={{ flex: 1, minWidth: '260px' }}
                                 />
                                 <button className="hero-button ghost" onClick={handleSsoSignIn}>
-                                    Start SSO
+                                    Start Company SSO
                                 </button>
                             </div>
                             {ssoError ? (

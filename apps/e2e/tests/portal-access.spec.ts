@@ -12,11 +12,13 @@ const adminHeaders = {
 interface BoardRecord {
   id: string;
   slug: string;
+  tenantKey: string;
+  publicBoardKey: string;
 }
 
-function getPortalBootstrapRequestKey(url: string, boardSlug: string): string | null {
+function getPortalBootstrapRequestKey(url: string, tenantKey: string, boardPublicKey: string): string | null {
   const parsed = new URL(url);
-  const boardApiPrefix = `/api/v1/public/boards/${boardSlug}`;
+  const boardApiPrefix = `/api/v1/public/t/${tenantKey}/boards/${boardPublicKey}`;
   if (!parsed.pathname.startsWith(boardApiPrefix)) return null;
 
   const suffix = parsed.pathname.slice(boardApiPrefix.length) || '/';
@@ -77,18 +79,18 @@ async function deactivateBoard(request: APIRequestContext, boardId: string): Pro
 
 async function expectAccessGateBootstrapToStayStable(
   page: Page,
-  boardSlug: string,
+  board: BoardRecord,
   assertGateUi: (page: Page) => Promise<void>,
 ): Promise<void> {
   const bootstrapResponseCounts = new Map<string, number>();
   page.on('response', (response) => {
-    const requestKey = getPortalBootstrapRequestKey(response.url(), boardSlug);
+    const requestKey = getPortalBootstrapRequestKey(response.url(), board.tenantKey, board.publicBoardKey);
     if (!requestKey) return;
     bootstrapResponseCounts.set(requestKey, (bootstrapResponseCounts.get(requestKey) ?? 0) + 1);
   });
 
-  await page.goto(`/portal/boards/${boardSlug}`);
-  await expect(page).toHaveURL(new RegExp(`/portal/boards/${boardSlug}`));
+  await page.goto(`/portal/t/${board.tenantKey}/boards/${board.publicBoardKey}`);
+  await expect(page).toHaveURL(new RegExp(`/portal/t/${board.tenantKey}/boards/${board.publicBoardKey}`));
   await assertGateUi(page);
 
   // React StrictMode remounts once in local dev, so two bootstrap fetches are acceptable.
@@ -115,7 +117,7 @@ test.describe('Portal access-gate stability', () => {
         portalTitle: 'E2E Private Access Gate',
       });
 
-      await expectAccessGateBootstrapToStayStable(page, board.slug, async (currentPage) => {
+      await expectAccessGateBootstrapToStayStable(page, board, async (currentPage) => {
         await expect(currentPage.getByRole('heading', { name: 'Private Feedback Portal' })).toBeVisible();
         await expect(currentPage.getByRole('button', { name: 'Sign In' })).toBeVisible();
         await expect(currentPage.getByText('This board requires authentication')).toBeVisible();
@@ -138,10 +140,11 @@ test.describe('Portal access-gate stability', () => {
         allowedEmails: ['allowed.user@example.com'],
       });
 
-      await expectAccessGateBootstrapToStayStable(page, board.slug, async (currentPage) => {
+      await expectAccessGateBootstrapToStayStable(page, board, async (currentPage) => {
         await expect(currentPage.getByRole('heading', { name: 'Restricted Workspace Portal' })).toBeVisible();
         await expect(currentPage.getByRole('button', { name: 'Sign In' })).toBeVisible();
-        await expect(currentPage.getByRole('button', { name: 'Start SSO' })).toBeVisible();
+        await expect(currentPage.getByRole('button', { name: 'Company Login' })).toBeVisible();
+        await expect(currentPage.getByRole('button', { name: 'Start Company SSO' })).toBeVisible();
         await expect(currentPage.getByPlaceholder('you@company.com or company.com')).toBeVisible();
       });
     } finally {

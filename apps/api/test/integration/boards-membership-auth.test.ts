@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const repositoryMock = vi.hoisted(() => ({
   ensureUser: vi.fn(),
   findWorkspaceMembership: vi.fn(),
+  findWorkspaceMembershipContext: vi.fn(),
+  findWorkspaceContext: vi.fn(),
   getPermissionOverride: vi.fn(),
   workspaceExists: vi.fn(),
   listBoards: vi.fn(),
@@ -37,6 +39,21 @@ const repositoryMock = vi.hoisted(() => ({
   deactivateWorkspaceMember: vi.fn(),
   createAuditEvent: vi.fn(),
   listAuditEvents: vi.fn(),
+  findActiveTenantImpersonationSessionByToken: vi.fn(),
+  findGlobalOperatorAssignment: vi.fn(),
+  createTenantImpersonationSession: vi.fn(),
+  revokeTenantImpersonationSession: vi.fn(),
+  findDefaultWorkspaceForTenant: vi.fn(),
+  findTenantById: vi.fn(),
+  findTenantDomainById: vi.fn(),
+  verifyTenantDomainClaim: vi.fn(),
+  listTenantDomains: vi.fn(),
+  listTenantSsoConnections: vi.fn(),
+  createTenantDomain: vi.fn(),
+  createSsoConnection: vi.fn(),
+  updateTenantDomain: vi.fn(),
+  updateTenantSsoConnection: vi.fn(),
+  deleteTenantDomain: vi.fn(),
 }));
 
 vi.mock('../../src/db/repositories.js', () => repositoryMock);
@@ -91,6 +108,22 @@ describe('boards + membership + portal parity auth flow (integration)', () => {
 
     repositoryMock.getPermissionOverride.mockResolvedValue(null);
     repositoryMock.workspaceExists.mockResolvedValue(true);
+    repositoryMock.findWorkspaceContext.mockResolvedValue({
+      id: 'ws-1',
+      tenantId: 'tenant-1',
+      name: 'Workspace',
+      slug: 'workspace',
+      active: true,
+    });
+    repositoryMock.findWorkspaceMembershipContext.mockResolvedValue({
+      userId: 'user-1',
+      email: 'user-1@customervoice.test',
+      role: 'workspace_admin',
+      active: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      tenantId: 'tenant-1',
+    });
     repositoryMock.createAuditEvent.mockResolvedValue({
       id: 'evt-1',
       workspaceId: 'ws-1',

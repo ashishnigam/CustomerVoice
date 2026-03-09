@@ -14,6 +14,7 @@ interface MembershipRow {
 interface AuditEventRow {
   id: string;
   workspace_id: string;
+  tenant_id: string | null;
   actor_id: string;
   action: string;
   metadata: Record<string, unknown>;
@@ -23,6 +24,9 @@ interface AuditEventRow {
 interface BoardRow {
   id: string;
   workspace_id: string;
+  tenant_id: string;
+  tenant_key: string | null;
+  public_board_key: string | null;
   slug: string;
   name: string;
   description: string | null;
@@ -91,9 +95,10 @@ interface IdeaAudienceRow {
 
 interface NotificationJobRow {
   id: string;
-  workspace_id: string;
-  board_id: string;
-  idea_id: string;
+  tenant_id: string | null;
+  workspace_id: string | null;
+  board_id: string | null;
+  idea_id: string | null;
   event_type: string;
   template_id: string;
   payload: Record<string, unknown>;
@@ -111,7 +116,8 @@ interface NotificationJobRow {
 interface NotificationRecipientRow {
   id: string;
   job_id: string;
-  workspace_id: string;
+  tenant_id: string | null;
+  workspace_id: string | null;
   user_id: string | null;
   email: string;
   status: 'pending' | 'sent' | 'failed';
@@ -124,11 +130,112 @@ interface NotificationRecipientRow {
 interface WebhookRow {
   id: string;
   workspace_id: string;
+  tenant_id: string | null;
   url: string;
   events: string[];
   secret: string;
   active: boolean;
   created_at: string;
+}
+
+interface WorkspaceContextRow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  slug: string;
+  active: boolean;
+}
+
+interface TenantRow {
+  id: string;
+  name: string;
+  slug: string;
+  tenant_key: string;
+  tenant_type: 'enterprise' | 'personal';
+  status: 'active' | 'pending_setup' | 'suspended';
+  primary_domain: string | null;
+  features: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface TenantDomainRow {
+  id: string;
+  tenant_id: string;
+  domain: string;
+  is_primary: boolean;
+  domain_kind: 'enterprise' | 'public_email_provider' | 'alias';
+  verification_status: 'pending' | 'verified' | 'failed' | 'blocked';
+  verification_method: 'dns_txt' | 'email' | 'manual' | 'system';
+  verification_token: string | null;
+  verified_at: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PortalTenantProfileRow {
+  id: string;
+  tenant_id: string;
+  portal_user_id: string;
+  account_type: 'personal_owner' | 'enterprise_member' | 'guest';
+  home_domain: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface TenantVisitorRow {
+  id: string;
+  tenant_id: string;
+  visitor_key: string;
+  session_token: string;
+  expires_at: string;
+  revoked_at: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+interface TenantActorRow {
+  id: string;
+  tenant_id: string;
+  actor_type: 'internal_user' | 'portal_user' | 'visitor' | 'system';
+  internal_user_id: string | null;
+  portal_user_id: string | null;
+  tenant_visitor_id: string | null;
+  display_name: string | null;
+  email: string | null;
+  created_at: string;
+}
+
+interface GlobalOperatorAssignmentRow {
+  user_id: string;
+  email: string;
+  global_role: 'support_admin' | 'global_admin';
+  active: boolean;
+  created_at: string;
+}
+
+interface TenantImpersonationSessionRow {
+  id: string;
+  operator_user_id: string;
+  operator_email: string;
+  tenant_id: string;
+  workspace_id: string;
+  assumed_role: Role;
+  session_token: string;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+interface PortalSessionContextRow extends PortalUserRow {
+  tenant_id: string | null;
+  workspace_id: string | null;
+  expires_at: string;
+  tenant_key: string | null;
+  tenant_type: 'enterprise' | 'personal' | null;
+  tenant_name: string | null;
+  account_type: 'personal_owner' | 'enterprise_member' | 'guest' | null;
 }
 
 interface IdeaAnalyticsRow {
@@ -162,6 +269,7 @@ export interface MembershipRecord {
 export interface AuditRecord {
   id: string;
   workspaceId: string;
+  tenantId: string | null;
   actorId: string;
   action: string;
   metadata: Record<string, unknown>;
@@ -171,6 +279,9 @@ export interface AuditRecord {
 export interface BoardRecord {
   id: string;
   workspaceId: string;
+  tenantId: string;
+  tenantKey: string | null;
+  publicBoardKey: string;
   slug: string;
   name: string;
   description: string | null;
@@ -248,9 +359,10 @@ export interface NotificationAudienceRecord {
 
 export interface NotificationJobRecord {
   id: string;
-  workspaceId: string;
-  boardId: string;
-  ideaId: string;
+  tenantId: string | null;
+  workspaceId: string | null;
+  boardId: string | null;
+  ideaId: string | null;
   eventType: string;
   templateId: string;
   payload: Record<string, unknown>;
@@ -268,7 +380,8 @@ export interface NotificationJobRecord {
 export interface NotificationRecipientRecord {
   id: string;
   jobId: string;
-  workspaceId: string;
+  tenantId: string | null;
+  workspaceId: string | null;
   userId: string | null;
   email: string;
   status: 'pending' | 'sent' | 'failed';
@@ -281,6 +394,7 @@ export interface NotificationRecipientRecord {
 export interface WebhookRecord {
   id: string;
   workspaceId: string;
+  tenantId: string | null;
   url: string;
   events: string[];
   secret: string;
@@ -317,6 +431,107 @@ export interface IdeaAnalyticsRecord {
   contactEmails: string[];
 }
 
+export interface WorkspaceContextRecord {
+  id: string;
+  tenantId: string;
+  name: string;
+  slug: string;
+  active: boolean;
+}
+
+export interface TenantRecord {
+  id: string;
+  name: string;
+  slug: string;
+  tenantKey: string;
+  tenantType: 'enterprise' | 'personal';
+  status: 'active' | 'pending_setup' | 'suspended';
+  primaryDomain: string | null;
+  features: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantDomainRecord {
+  id: string;
+  tenantId: string;
+  domain: string;
+  isPrimary: boolean;
+  domainKind: 'enterprise' | 'public_email_provider' | 'alias';
+  verificationStatus: 'pending' | 'verified' | 'failed' | 'blocked';
+  verificationMethod: 'dns_txt' | 'email' | 'manual' | 'system';
+  verificationToken: string | null;
+  verifiedAt: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortalTenantProfileRecord {
+  id: string;
+  tenantId: string;
+  portalUserId: string;
+  accountType: 'personal_owner' | 'enterprise_member' | 'guest';
+  homeDomain: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantVisitorRecord {
+  id: string;
+  tenantId: string;
+  visitorKey: string;
+  sessionToken: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface TenantActorRecord {
+  id: string;
+  tenantId: string;
+  actorType: 'internal_user' | 'portal_user' | 'visitor' | 'system';
+  internalUserId: string | null;
+  portalUserId: string | null;
+  tenantVisitorId: string | null;
+  displayName: string | null;
+  email: string | null;
+  createdAt: string;
+}
+
+export interface GlobalOperatorAssignmentRecord {
+  userId: string;
+  email: string;
+  globalRole: 'support_admin' | 'global_admin';
+  active: boolean;
+  createdAt: string;
+}
+
+export interface TenantImpersonationSessionRecord {
+  id: string;
+  operatorUserId: string;
+  operatorEmail: string;
+  tenantId: string;
+  workspaceId: string;
+  assumedRole: Role;
+  sessionToken: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface PortalSessionContextRecord {
+  user: PortalUserRecord;
+  tenantId: string | null;
+  workspaceId: string | null;
+  expiresAt: string;
+  tenantKey: string | null;
+  tenantType: 'enterprise' | 'personal' | null;
+  tenantName: string | null;
+  accountType: 'personal_owner' | 'enterprise_member' | 'guest' | null;
+}
+
 function mapMembership(row: MembershipRow): MembershipRecord {
   return {
     userId: row.user_id,
@@ -332,6 +547,7 @@ function mapAudit(row: AuditEventRow): AuditRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
+    tenantId: row.tenant_id,
     actorId: row.actor_id,
     action: row.action,
     metadata: row.metadata ?? {},
@@ -343,6 +559,9 @@ function mapBoard(row: BoardRow): BoardRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
+    tenantId: row.tenant_id,
+    tenantKey: row.tenant_key,
+    publicBoardKey: row.public_board_key ?? row.slug,
     slug: row.slug,
     name: row.name,
     description: row.description,
@@ -415,6 +634,7 @@ function mapIdeaCategory(row: IdeaCategoryRow): IdeaCategoryRecord {
 function mapNotificationJob(row: NotificationJobRow): NotificationJobRecord {
   return {
     id: row.id,
+    tenantId: row.tenant_id,
     workspaceId: row.workspace_id,
     boardId: row.board_id,
     ideaId: row.idea_id,
@@ -437,6 +657,7 @@ function mapNotificationRecipient(row: NotificationRecipientRow): NotificationRe
   return {
     id: row.id,
     jobId: row.job_id,
+    tenantId: row.tenant_id,
     workspaceId: row.workspace_id,
     userId: row.user_id,
     email: row.email,
@@ -444,6 +665,112 @@ function mapNotificationRecipient(row: NotificationRecipientRow): NotificationRe
     attempts: row.attempts,
     lastError: row.last_error,
     sentAt: row.sent_at,
+    createdAt: row.created_at,
+  };
+}
+
+function mapWorkspaceContext(row: WorkspaceContextRow): WorkspaceContextRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    name: row.name,
+    slug: row.slug,
+    active: row.active,
+  };
+}
+
+function mapTenant(row: TenantRow): TenantRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    tenantKey: row.tenant_key,
+    tenantType: row.tenant_type,
+    status: row.status,
+    primaryDomain: row.primary_domain,
+    features: row.features ?? {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapTenantDomain(row: TenantDomainRow): TenantDomainRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    domain: row.domain,
+    isPrimary: row.is_primary,
+    domainKind: row.domain_kind,
+    verificationStatus: row.verification_status,
+    verificationMethod: row.verification_method,
+    verificationToken: row.verification_token,
+    verifiedAt: row.verified_at,
+    active: row.active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapPortalTenantProfile(row: PortalTenantProfileRow): PortalTenantProfileRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    portalUserId: row.portal_user_id,
+    accountType: row.account_type,
+    homeDomain: row.home_domain,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapTenantVisitor(row: TenantVisitorRow): TenantVisitorRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    visitorKey: row.visitor_key,
+    sessionToken: row.session_token,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+  };
+}
+
+function mapTenantActor(row: TenantActorRow): TenantActorRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    actorType: row.actor_type,
+    internalUserId: row.internal_user_id,
+    portalUserId: row.portal_user_id,
+    tenantVisitorId: row.tenant_visitor_id,
+    displayName: row.display_name,
+    email: row.email,
+    createdAt: row.created_at,
+  };
+}
+
+function mapGlobalOperatorAssignment(row: GlobalOperatorAssignmentRow): GlobalOperatorAssignmentRecord {
+  return {
+    userId: row.user_id,
+    email: row.email,
+    globalRole: row.global_role,
+    active: row.active,
+    createdAt: row.created_at,
+  };
+}
+
+function mapTenantImpersonationSession(row: TenantImpersonationSessionRow): TenantImpersonationSessionRecord {
+  return {
+    id: row.id,
+    operatorUserId: row.operator_user_id,
+    operatorEmail: row.operator_email,
+    tenantId: row.tenant_id,
+    workspaceId: row.workspace_id,
+    assumedRole: row.assumed_role,
+    sessionToken: row.session_token,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
     createdAt: row.created_at,
   };
 }
@@ -457,6 +784,39 @@ function slugify(value: string): string {
     .slice(0, 64);
 
   return base.length > 0 ? base : `board-${uuidv4().slice(0, 8)}`;
+}
+
+const publicEmailProviderDomains = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.com',
+  'live.com',
+  'msn.com',
+  'yahoo.com',
+  'icloud.com',
+  'me.com',
+  'aol.com',
+  'proton.me',
+  'protonmail.com',
+  'gmx.com',
+  'mail.com',
+]);
+
+function normalizeDomain(value: string): string {
+  return value.trim().toLowerCase().replace(/^@+/, '');
+}
+
+function extractEmailDomain(email: string): string {
+  return normalizeDomain(email.split('@')[1] ?? '');
+}
+
+export function isPublicEmailProviderDomain(domain: string): boolean {
+  return publicEmailProviderDomains.has(normalizeDomain(domain));
+}
+
+function buildTenantVisitorSessionToken(): string {
+  return `tvs_${uuidv4().replaceAll('-', '')}`;
 }
 
 async function generateUniqueBoardSlug(workspaceId: string, name: string): Promise<string> {
@@ -481,6 +841,59 @@ async function generateUniqueBoardSlug(workspaceId: string, name: string): Promi
   while (existingSlugs.has(candidate)) {
     suffix += 1;
     candidate = `${baseSlug}-${suffix}`;
+  }
+
+  return candidate;
+}
+
+async function generateUniqueTenantSlug(name: string): Promise<string> {
+  const baseSlug = slugify(name);
+  const existing = await query<{ slug: string }>(
+    `
+      SELECT slug
+      FROM tenants
+      WHERE slug = $1 OR slug LIKE $2
+    `,
+    [baseSlug, `${baseSlug}-%`],
+  );
+
+  const existingSlugs = new Set(existing.rows.map((row) => row.slug));
+  if (existingSlugs.size === 0) {
+    return baseSlug;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseSlug}-${suffix}`;
+  while (existingSlugs.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseSlug}-${suffix}`;
+  }
+
+  return candidate;
+}
+
+async function generateUniquePublicBoardKey(tenantId: string, name: string): Promise<string> {
+  const baseKey = slugify(name);
+  const existing = await query<{ public_board_key: string }>(
+    `
+      SELECT public_board_key
+      FROM boards
+      WHERE tenant_id = $1
+        AND (public_board_key = $2 OR public_board_key LIKE $3)
+    `,
+    [tenantId, baseKey, `${baseKey}-%`],
+  );
+
+  const existingKeys = new Set(existing.rows.map((row) => row.public_board_key));
+  if (existingKeys.size === 0) {
+    return baseKey;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseKey}-${suffix}`;
+  while (existingKeys.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseKey}-${suffix}`;
   }
 
   return candidate;
@@ -523,12 +936,349 @@ export async function ensureUser(params: {
   );
 }
 
-export async function workspaceExists(workspaceId: string): Promise<boolean> {
-  const result = await query<{ present: number }>(
-    'SELECT 1 AS present FROM workspaces WHERE id = $1 AND active = TRUE',
+export async function findWorkspaceContext(workspaceId: string): Promise<WorkspaceContextRecord | null> {
+  const result = await query<WorkspaceContextRow>(
+    `
+      SELECT id, tenant_id, name, slug, active
+      FROM workspaces
+      WHERE id = $1
+      LIMIT 1
+    `,
     [workspaceId],
   );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapWorkspaceContext(result.rows[0]);
+}
+
+export async function workspaceExists(workspaceId: string): Promise<boolean> {
+  const workspace = await findWorkspaceContext(workspaceId);
+  return workspace?.active === true;
+}
+
+export async function findTenantById(tenantId: string): Promise<TenantRecord | null> {
+  const result = await query<TenantRow>(
+    `
+      SELECT id, name, slug, tenant_key, tenant_type, status, primary_domain, features, created_at, updated_at
+      FROM tenants
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [tenantId],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenant(result.rows[0]);
+}
+
+export async function findTenantByKey(tenantKey: string): Promise<TenantRecord | null> {
+  const result = await query<TenantRow>(
+    `
+      SELECT id, name, slug, tenant_key, tenant_type, status, primary_domain, features, created_at, updated_at
+      FROM tenants
+      WHERE tenant_key = $1
+      LIMIT 1
+    `,
+    [tenantKey],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenant(result.rows[0]);
+}
+
+export async function createTenant(params: {
+  name: string;
+  tenantType: 'enterprise' | 'personal';
+  status?: 'active' | 'pending_setup' | 'suspended';
+  primaryDomain?: string | null;
+  features?: Record<string, unknown>;
+}): Promise<TenantRecord> {
+  const id = uuidv4();
+  const slug = await generateUniqueTenantSlug(params.name);
+  const result = await query<TenantRow>(
+    `
+      INSERT INTO tenants (id, name, slug, tenant_type, status, primary_domain, features)
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      RETURNING id, name, slug, tenant_key, tenant_type, status, primary_domain, features, created_at, updated_at
+    `,
+    [
+      id,
+      params.name,
+      slug,
+      params.tenantType,
+      params.status ?? 'active',
+      params.primaryDomain ?? null,
+      JSON.stringify(params.features ?? {}),
+    ],
+  );
+
+  return mapTenant(result.rows[0]);
+}
+
+export async function listTenantDomains(tenantId: string): Promise<TenantDomainRecord[]> {
+  const result = await query<TenantDomainRow>(
+    `
+      SELECT *
+      FROM tenant_domains
+      WHERE tenant_id = $1
+      ORDER BY is_primary DESC, domain ASC
+    `,
+    [tenantId],
+  );
+
+  return result.rows.map(mapTenantDomain);
+}
+
+export async function findTenantDomainByDomain(domain: string): Promise<TenantDomainRecord | null> {
+  const normalized = normalizeDomain(domain);
+  const result = await query<TenantDomainRow>(
+    `
+      SELECT *
+      FROM tenant_domains
+      WHERE LOWER(domain) = LOWER($1)
+        AND active = TRUE
+      LIMIT 1
+    `,
+    [normalized],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenantDomain(result.rows[0]);
+}
+
+export async function findTenantDomainById(params: {
+  tenantId: string;
+  domainId: string;
+}): Promise<TenantDomainRecord | null> {
+  const result = await query<TenantDomainRow>(
+    `
+      SELECT *
+      FROM tenant_domains
+      WHERE tenant_id = $1
+        AND id = $2
+      LIMIT 1
+    `,
+    [params.tenantId, params.domainId],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenantDomain(result.rows[0]);
+}
+
+export async function findVerifiedTenantDomain(domain: string): Promise<TenantDomainRecord | null> {
+  const normalized = normalizeDomain(domain);
+  const result = await query<TenantDomainRow>(
+    `
+      SELECT *
+      FROM tenant_domains
+      WHERE LOWER(domain) = LOWER($1)
+        AND active = TRUE
+        AND verification_status = 'verified'
+      LIMIT 1
+    `,
+    [normalized],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenantDomain(result.rows[0]);
+}
+
+export async function createTenantDomain(params: {
+  tenantId: string;
+  domain: string;
+  isPrimary?: boolean;
+  domainKind?: 'enterprise' | 'public_email_provider' | 'alias';
+  verificationStatus?: 'pending' | 'verified' | 'failed' | 'blocked';
+  verificationMethod?: 'dns_txt' | 'email' | 'manual' | 'system';
+  verificationToken?: string | null;
+}): Promise<TenantDomainRecord> {
+  const id = uuidv4();
+  const normalized = normalizeDomain(params.domain);
+  const result = await query<TenantDomainRow>(
+    `
+      INSERT INTO tenant_domains (
+        id,
+        tenant_id,
+        domain,
+        is_primary,
+        domain_kind,
+        verification_status,
+        verification_method,
+        verification_token,
+        verified_at,
+        active
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $6 = 'verified' THEN NOW() ELSE NULL END, TRUE)
+      RETURNING *
+    `,
+    [
+      id,
+      params.tenantId,
+      normalized,
+      params.isPrimary ?? false,
+      params.domainKind ?? 'enterprise',
+      params.verificationStatus ?? 'pending',
+      params.verificationMethod ?? 'dns_txt',
+      params.verificationToken ?? `verify_${uuidv4().replaceAll('-', '')}`,
+    ],
+  );
+
+  if (params.isPrimary) {
+    await query(
+      `
+        UPDATE tenants
+        SET primary_domain = $2, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [params.tenantId, normalized],
+    );
+  }
+
+  return mapTenantDomain(result.rows[0]);
+}
+
+export async function updateTenantDomain(params: {
+  tenantId: string;
+  domainId: string;
+  domain?: string;
+  isPrimary?: boolean;
+  domainKind?: 'enterprise' | 'public_email_provider' | 'alias';
+  verificationStatus?: 'pending' | 'verified' | 'failed' | 'blocked';
+  verificationMethod?: 'dns_txt' | 'email' | 'manual' | 'system';
+  active?: boolean;
+}): Promise<TenantDomainRecord | null> {
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let index = 1;
+
+  if (params.domain !== undefined) {
+    updates.push(`domain = $${index++}`);
+    values.push(normalizeDomain(params.domain));
+    const nextVerificationToken = `verify_${uuidv4().replaceAll('-', '')}`;
+    updates.push(`verification_status = 'pending'`);
+    updates.push(`verification_method = 'dns_txt'`);
+    updates.push(`verification_token = $${index++}`);
+    values.push(nextVerificationToken);
+    updates.push(`verified_at = NULL`);
+  }
+  if (params.isPrimary !== undefined) {
+    updates.push(`is_primary = $${index++}`);
+    values.push(params.isPrimary);
+  }
+  if (params.domainKind !== undefined) {
+    updates.push(`domain_kind = $${index++}`);
+    values.push(params.domainKind);
+  }
+  if (params.verificationStatus !== undefined) {
+    updates.push(`verification_status = $${index++}`);
+    values.push(params.verificationStatus);
+    updates.push(`verified_at = CASE WHEN $${index - 1} = 'verified' THEN NOW() ELSE tenant_domains.verified_at END`);
+  }
+  if (params.verificationMethod !== undefined) {
+    updates.push(`verification_method = $${index++}`);
+    values.push(params.verificationMethod);
+  }
+  if (params.active !== undefined) {
+    updates.push(`active = $${index++}`);
+    values.push(params.active);
+  }
+
+  if (updates.length === 0) {
+    const current = await query<TenantDomainRow>(
+      `SELECT * FROM tenant_domains WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+      [params.tenantId, params.domainId],
+    );
+    return (current.rowCount ?? 0) === 0 ? null : mapTenantDomain(current.rows[0]);
+  }
+
+  values.push(params.tenantId, params.domainId);
+  const tenantPos = index++;
+  const domainPos = index++;
+
+  const result = await query<TenantDomainRow>(
+    `
+      UPDATE tenant_domains
+      SET ${updates.join(', ')}, updated_at = NOW()
+      WHERE tenant_id = $${tenantPos} AND id = $${domainPos}
+      RETURNING *
+    `,
+    values,
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    return null;
+  }
+
+  const updated = mapTenantDomain(result.rows[0]);
+  if (updated.isPrimary) {
+    await query(
+      `
+        UPDATE tenants
+        SET primary_domain = $2, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [params.tenantId, updated.domain],
+    );
+  }
+
+  return updated;
+}
+
+export async function deleteTenantDomain(params: {
+  tenantId: string;
+  domainId: string;
+}): Promise<boolean> {
+  const result = await query<{ id: string }>(
+    `
+      DELETE FROM tenant_domains
+      WHERE tenant_id = $1 AND id = $2
+      RETURNING id
+    `,
+    [params.tenantId, params.domainId],
+  );
+
   return (result.rowCount ?? 0) > 0;
+}
+
+export async function verifyTenantDomainClaim(params: {
+  tenantId: string;
+  domainId: string;
+  proofToken: string;
+  verificationMethod?: 'dns_txt' | 'email' | 'manual' | 'system';
+}): Promise<TenantDomainRecord | null> {
+  const result = await query<TenantDomainRow>(
+    `
+      UPDATE tenant_domains
+      SET
+        verification_status = 'verified',
+        verification_method = $3,
+        verified_at = NOW(),
+        active = TRUE,
+        updated_at = NOW()
+      WHERE tenant_id = $1
+        AND id = $2
+        AND verification_token = $4
+      RETURNING *
+    `,
+    [
+      params.tenantId,
+      params.domainId,
+      params.verificationMethod ?? 'dns_txt',
+      params.proofToken.trim(),
+    ],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    return null;
+  }
+
+  const verified = mapTenantDomain(result.rows[0]);
+  if (verified.isPrimary) {
+    await query(
+      `
+        UPDATE tenants
+        SET primary_domain = $2, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [params.tenantId, verified.domain],
+    );
+  }
+
+  return verified;
 }
 
 export async function listBoards(params: {
@@ -539,20 +1289,24 @@ export async function listBoards(params: {
   const result = await query<BoardRow>(
     `
       SELECT
-        id,
-        workspace_id,
-        slug,
-        name,
-        description,
-        visibility,
-        active,
-        created_by,
-        created_at,
-        updated_at
-      FROM boards
-      WHERE workspace_id = $1
-        AND ($2::boolean = TRUE OR active = TRUE)
-      ORDER BY created_at DESC
+        b.id,
+        b.workspace_id,
+        b.tenant_id,
+        t.tenant_key,
+        b.public_board_key,
+        b.slug,
+        b.name,
+        b.description,
+        b.visibility,
+        b.active,
+        b.created_by,
+        b.created_at,
+        b.updated_at
+      FROM boards b
+      JOIN tenants t ON t.id = b.tenant_id
+      WHERE b.workspace_id = $1
+        AND ($2::boolean = TRUE OR b.active = TRUE)
+      ORDER BY b.created_at DESC
     `,
     [params.workspaceId, includeInactive],
   );
@@ -567,18 +1321,22 @@ export async function findBoard(params: {
   const result = await query<BoardRow>(
     `
       SELECT
-        id,
-        workspace_id,
-        slug,
-        name,
-        description,
-        visibility,
-        active,
-        created_by,
-        created_at,
-        updated_at
-      FROM boards
-      WHERE workspace_id = $1 AND id = $2
+        b.id,
+        b.workspace_id,
+        b.tenant_id,
+        t.tenant_key,
+        b.public_board_key,
+        b.slug,
+        b.name,
+        b.description,
+        b.visibility,
+        b.active,
+        b.created_by,
+        b.created_at,
+        b.updated_at
+      FROM boards b
+      JOIN tenants t ON t.id = b.tenant_id
+      WHERE b.workspace_id = $1 AND b.id = $2
       LIMIT 1
     `,
     [params.workspaceId, params.boardId],
@@ -595,25 +1353,87 @@ export async function findBoardBySlug(params: {
   const result = await query<BoardRow>(
     `
       SELECT
-        id,
-        workspace_id,
-        slug,
-        name,
-        description,
-        visibility,
-        active,
-        created_by,
-        created_at,
-        updated_at
-      FROM boards
-      WHERE (slug = $1 OR slug LIKE $1 || '-%')
-        AND active = TRUE
-        AND ($2::boolean = FALSE OR visibility = 'public')
-      ORDER BY
-        CASE WHEN slug = $1 THEN 0 ELSE 1 END
-      LIMIT 1
+        b.id,
+        b.workspace_id,
+        b.tenant_id,
+        t.tenant_key,
+        b.public_board_key,
+        b.slug,
+        b.name,
+        b.description,
+        b.visibility,
+        b.active,
+        b.created_by,
+        b.created_at,
+        b.updated_at
+      FROM boards b
+      JOIN tenants t ON t.id = b.tenant_id
+      WHERE b.slug = $1
+        AND b.active = TRUE
+        AND ($2::boolean = FALSE OR b.visibility = 'public')
+      ORDER BY b.created_at ASC
+      LIMIT 2
     `,
     [params.slug, onlyPublic],
+  );
+
+  if ((result.rowCount ?? 0) !== 1) {
+    return null;
+  }
+
+  return mapBoard(result.rows[0]);
+}
+
+export async function countBoardsByLegacySlug(params: {
+  slug: string;
+  onlyPublic?: boolean;
+}): Promise<number> {
+  const onlyPublic = params.onlyPublic ?? true;
+  const result = await query<{ count: string | number }>(
+    `
+      SELECT COUNT(*)::int AS count
+      FROM boards
+      WHERE slug = $1
+        AND active = TRUE
+        AND ($2::boolean = FALSE OR visibility = 'public')
+    `,
+    [params.slug, onlyPublic],
+  );
+
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+export async function findBoardByPublicKey(params: {
+  tenantKey: string;
+  publicBoardKey: string;
+  onlyPublic?: boolean;
+}): Promise<BoardRecord | null> {
+  const onlyPublic = params.onlyPublic ?? true;
+  const result = await query<BoardRow>(
+    `
+      SELECT
+        b.id,
+        b.workspace_id,
+        b.tenant_id,
+        t.tenant_key,
+        b.public_board_key,
+        b.slug,
+        b.name,
+        b.description,
+        b.visibility,
+        b.active,
+        b.created_by,
+        b.created_at,
+        b.updated_at
+      FROM boards b
+      JOIN tenants t ON t.id = b.tenant_id
+      WHERE t.tenant_key = $1
+        AND b.public_board_key = $2
+        AND b.active = TRUE
+        AND ($3::boolean = FALSE OR b.visibility = 'public')
+      LIMIT 1
+    `,
+    [params.tenantKey, params.publicBoardKey, onlyPublic],
   );
 
   return (result.rowCount ?? 0) === 0 ? null : mapBoard(result.rows[0]);
@@ -627,14 +1447,22 @@ export async function createBoard(params: {
   createdBy: string;
 }): Promise<BoardRecord> {
   const id = uuidv4();
+  const workspace = await findWorkspaceContext(params.workspaceId);
+  if (!workspace) {
+    throw new Error('workspace_not_found');
+  }
   const slug = await generateUniqueBoardSlug(params.workspaceId, params.name);
+  const publicBoardKey = await generateUniquePublicBoardKey(workspace.tenantId, params.name);
   const result = await query<BoardRow>(
     `
-      INSERT INTO boards (id, workspace_id, slug, name, description, visibility, active, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)
+      INSERT INTO boards (id, workspace_id, tenant_id, slug, public_board_key, name, description, visibility, active, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, $9)
       RETURNING
         id,
         workspace_id,
+        tenant_id,
+        (SELECT tenant_key FROM tenants WHERE id = $3) AS tenant_key,
+        public_board_key,
         slug,
         name,
         description,
@@ -644,7 +1472,17 @@ export async function createBoard(params: {
         created_at,
         updated_at
     `,
-    [id, params.workspaceId, slug, params.name, params.description ?? null, params.visibility, params.createdBy],
+    [
+      id,
+      params.workspaceId,
+      workspace.tenantId,
+      slug,
+      publicBoardKey,
+      params.name,
+      params.description ?? null,
+      params.visibility,
+      params.createdBy,
+    ],
   );
 
   if ((result.rowCount ?? 0) === 0) {
@@ -703,6 +1541,9 @@ export async function updateBoard(params: {
       RETURNING
         id,
         workspace_id,
+        tenant_id,
+        (SELECT tenant_key FROM tenants WHERE id = boards.tenant_id) AS tenant_key,
+        public_board_key,
         slug,
         name,
         description,
@@ -1051,6 +1892,8 @@ export async function findIdeaById(params: {
 export async function createIdea(params: {
   workspaceId: string;
   boardId: string;
+  tenantId?: string;
+  tenantActorId?: string | null;
   title: string;
   description: string;
   status?: IdeaStatus;
@@ -1066,6 +1909,8 @@ export async function createIdea(params: {
           id,
           workspace_id,
           board_id,
+          tenant_id,
+          tenant_actor_id,
           title,
           description,
           status,
@@ -1075,12 +1920,14 @@ export async function createIdea(params: {
           created_by,
           updated_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, 'normal', FALSE, TRUE, $7, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'normal', FALSE, TRUE, $9, $9)
       `,
       [
         id,
         params.workspaceId,
         params.boardId,
+        params.tenantId ?? null,
+        params.tenantActorId ?? null,
         params.title,
         params.description,
         status,
@@ -1179,14 +2026,16 @@ export async function voteIdea(params: {
   workspaceId: string;
   ideaId: string;
   userId: string;
+  tenantId?: string;
+  tenantActorId?: string | null;
 }): Promise<IdeaVoteRecord> {
   await query(
     `
-      INSERT INTO idea_votes (workspace_id, idea_id, user_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO idea_votes (workspace_id, idea_id, user_id, tenant_id, tenant_actor_id)
+      VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT (idea_id, user_id) DO NOTHING
     `,
-    [params.workspaceId, params.ideaId, params.userId],
+    [params.workspaceId, params.ideaId, params.userId, params.tenantId ?? null, params.tenantActorId ?? null],
   );
 
   return getIdeaVoteState(params);
@@ -1249,6 +2098,8 @@ export async function createIdeaComment(params: {
   userId: string;
   body: string;
   isInternal?: boolean;
+  tenantId?: string;
+  tenantActorId?: string | null;
 }): Promise<IdeaCommentRecord> {
   const ideaLockCheck = await query<{ comments_locked: boolean }>(
     `
@@ -1276,11 +2127,13 @@ export async function createIdeaComment(params: {
         workspace_id,
         idea_id,
         user_id,
+        tenant_id,
+        tenant_actor_id,
         body,
         is_internal,
         active
       )
-      VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
       RETURNING
         id,
         workspace_id,
@@ -1299,7 +2152,16 @@ export async function createIdeaComment(params: {
         created_at,
         updated_at
     `,
-    [id, params.workspaceId, params.ideaId, params.userId, params.body, params.isInternal ?? false],
+    [
+      id,
+      params.workspaceId,
+      params.ideaId,
+      params.userId,
+      params.tenantId ?? null,
+      params.tenantActorId ?? null,
+      params.body,
+      params.isInternal ?? false,
+    ],
   );
 
   if ((result.rowCount ?? 0) === 0) {
@@ -1813,6 +2675,7 @@ export async function resolveIdeaAudience(params: {
 }
 
 export async function createNotificationJob(params: {
+  tenantId?: string;
   workspaceId?: string;
   boardId?: string;
   ideaId?: string;
@@ -1825,6 +2688,23 @@ export async function createNotificationJob(params: {
 }): Promise<NotificationJobRecord> {
   const jobId = uuidv4();
   const maxAttempts = Math.max(1, Math.min(params.maxAttempts ?? 3, 10));
+  let tenantId = params.tenantId ?? null;
+  if (!tenantId && params.workspaceId) {
+    const workspace = await findWorkspaceContext(params.workspaceId);
+    tenantId = workspace?.tenantId ?? null;
+  }
+  if (!tenantId && params.boardId) {
+    const boardTenant = await query<{ tenant_id: string }>(
+      `
+        SELECT tenant_id
+        FROM boards
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [params.boardId],
+    );
+    tenantId = boardTenant.rows[0]?.tenant_id ?? null;
+  }
   const deduplicatedRecipients = Array.from(
     new Map(
       params.recipients.map((recipient) => [
@@ -1841,6 +2721,7 @@ export async function createNotificationJob(params: {
       `
         INSERT INTO notification_jobs (
           id,
+          tenant_id,
           workspace_id,
           board_id,
           idea_id,
@@ -1854,11 +2735,12 @@ export async function createNotificationJob(params: {
           processed_at
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11,
-          CASE WHEN $8 = 'sent' THEN NOW() ELSE NULL END
+          $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12,
+          CASE WHEN $9 = 'sent' THEN NOW() ELSE NULL END
         )
         RETURNING
           id,
+          tenant_id,
           workspace_id,
           board_id,
           idea_id,
@@ -1877,6 +2759,7 @@ export async function createNotificationJob(params: {
       `,
       [
         jobId,
+        tenantId,
         params.workspaceId ?? null,
         params.boardId ?? null,
         params.ideaId ?? null,
@@ -1900,15 +2783,23 @@ export async function createNotificationJob(params: {
           INSERT INTO notification_job_recipients (
             id,
             job_id,
+            tenant_id,
             workspace_id,
             user_id,
             email,
             status
           )
-          VALUES ($1, $2, $3, $4, $5, 'pending')
+          VALUES ($1, $2, $3, $4, $5, $6, 'pending')
           ON CONFLICT (job_id, email) DO NOTHING
         `,
-        [uuidv4(), jobId, params.workspaceId ?? null, recipient.userId ?? null, recipient.email.toLowerCase()],
+        [
+          uuidv4(),
+          jobId,
+          tenantId,
+          params.workspaceId ?? null,
+          recipient.userId ?? null,
+          recipient.email.toLowerCase(),
+        ],
       );
     }
 
@@ -1925,6 +2816,7 @@ export async function claimNextNotificationJob(): Promise<{
       `
         SELECT
           id,
+          tenant_id,
           workspace_id,
           board_id,
           idea_id,
@@ -1971,6 +2863,7 @@ export async function claimNextNotificationJob(): Promise<{
         SELECT
           id,
           job_id,
+          tenant_id,
           workspace_id,
           user_id,
           email,
@@ -2055,6 +2948,7 @@ export async function listNotificationJobRecipients(jobId: string): Promise<Noti
       SELECT
         id,
         job_id,
+        tenant_id,
         workspace_id,
         user_id,
         email,
@@ -2253,6 +3147,39 @@ export async function findWorkspaceMembership(
   return (result.rowCount ?? 0) === 0 ? null : mapMembership(result.rows[0]);
 }
 
+export async function findWorkspaceMembershipContext(
+  workspaceId: string,
+  userId: string,
+): Promise<(MembershipRecord & { tenantId: string }) | null> {
+  const result = await query<MembershipRow & { tenant_id: string }>(
+    `
+      SELECT
+        m.user_id,
+        u.email,
+        m.role,
+        m.active,
+        m.created_at,
+        m.updated_at,
+        w.tenant_id
+      FROM workspace_memberships m
+      JOIN users u ON u.id = m.user_id
+      JOIN workspaces w ON w.id = m.workspace_id
+      WHERE m.workspace_id = $1 AND m.user_id = $2
+      LIMIT 1
+    `,
+    [workspaceId, userId],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    return null;
+  }
+
+  return {
+    ...mapMembership(result.rows[0]),
+    tenantId: result.rows[0].tenant_id,
+  };
+}
+
 export async function listWorkspaceMemberships(workspaceId: string): Promise<MembershipRecord[]> {
   const result = await query<MembershipRow>(
     `
@@ -2289,8 +3216,8 @@ export async function inviteWorkspaceMember(params: {
 
     await client.query(
       `
-        INSERT INTO workspace_memberships (workspace_id, user_id, role, active, invited_by)
-        VALUES ($1, $2, $3, TRUE, $4)
+        INSERT INTO workspace_memberships (workspace_id, tenant_id, user_id, role, active, invited_by)
+        VALUES ($1, (SELECT tenant_id FROM workspaces WHERE id = $1), $2, $3, TRUE, $4)
         ON CONFLICT (workspace_id, user_id)
         DO UPDATE
         SET role = EXCLUDED.role,
@@ -2378,9 +3305,16 @@ export async function createAuditEvent(params: {
   const id = uuidv4();
   const result = await query<AuditEventRow>(
     `
-      INSERT INTO audit_events (id, workspace_id, actor_id, action, metadata)
-      VALUES ($1, $2, $3, $4, $5::jsonb)
-      RETURNING id, workspace_id, actor_id, action, metadata, created_at
+      INSERT INTO audit_events (id, workspace_id, tenant_id, actor_id, action, metadata)
+      VALUES (
+        $1,
+        $2,
+        (SELECT tenant_id FROM workspaces WHERE id = $2),
+        $3,
+        $4,
+        $5::jsonb
+      )
+      RETURNING id, workspace_id, tenant_id, actor_id, action, metadata, created_at
     `,
     [id, params.workspaceId, params.actorId, params.action, JSON.stringify(params.metadata ?? {})],
   );
@@ -2396,7 +3330,7 @@ export async function listAuditEvents(workspaceId: string, limit = 100): Promise
   const clampedLimit = Math.max(1, Math.min(limit, 500));
   const result = await query<AuditEventRow>(
     `
-      SELECT id, workspace_id, actor_id, action, metadata, created_at
+      SELECT id, workspace_id, tenant_id, actor_id, action, metadata, created_at
       FROM audit_events
       WHERE workspace_id = $1
       ORDER BY created_at DESC
@@ -2702,8 +3636,322 @@ export async function findPortalUserById(userId: string): Promise<PortalUserReco
   return mapPortalUser(result.rows[0]);
 }
 
+export async function listPortalTenantProfiles(portalUserId: string): Promise<PortalTenantProfileRecord[]> {
+  const result = await query<PortalTenantProfileRow>(
+    `
+      SELECT *
+      FROM portal_tenant_profiles
+      WHERE portal_user_id = $1
+      ORDER BY created_at ASC
+    `,
+    [portalUserId],
+  );
+
+  return result.rows.map(mapPortalTenantProfile);
+}
+
+export async function findPortalTenantProfile(params: {
+  tenantId: string;
+  portalUserId: string;
+}): Promise<PortalTenantProfileRecord | null> {
+  const result = await query<PortalTenantProfileRow>(
+    `
+      SELECT *
+      FROM portal_tenant_profiles
+      WHERE tenant_id = $1 AND portal_user_id = $2
+      LIMIT 1
+    `,
+    [params.tenantId, params.portalUserId],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapPortalTenantProfile(result.rows[0]);
+}
+
+export async function ensurePortalTenantProfile(params: {
+  tenantId: string;
+  portalUserId: string;
+  accountType: 'personal_owner' | 'enterprise_member' | 'guest';
+  homeDomain?: string | null;
+}): Promise<PortalTenantProfileRecord> {
+  const result = await query<PortalTenantProfileRow>(
+    `
+      INSERT INTO portal_tenant_profiles (id, tenant_id, portal_user_id, account_type, home_domain)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (tenant_id, portal_user_id)
+      DO UPDATE
+      SET account_type = EXCLUDED.account_type,
+          home_domain = COALESCE(EXCLUDED.home_domain, portal_tenant_profiles.home_domain),
+          updated_at = NOW()
+      RETURNING *
+    `,
+    [uuidv4(), params.tenantId, params.portalUserId, params.accountType, params.homeDomain ?? null],
+  );
+
+  return mapPortalTenantProfile(result.rows[0]);
+}
+
+export async function findDefaultWorkspaceForTenant(tenantId: string): Promise<WorkspaceContextRecord | null> {
+  const result = await query<WorkspaceContextRow>(
+    `
+      SELECT id, tenant_id, name, slug, active
+      FROM workspaces
+      WHERE tenant_id = $1 AND active = TRUE
+      ORDER BY created_at ASC
+      LIMIT 1
+    `,
+    [tenantId],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapWorkspaceContext(result.rows[0]);
+}
+
+export async function upsertGlobalOperatorAssignment(params: {
+  userId: string;
+  email: string;
+  globalRole: 'support_admin' | 'global_admin';
+  active?: boolean;
+}): Promise<GlobalOperatorAssignmentRecord> {
+  await ensureUser({
+    userId: params.userId,
+    email: params.email,
+  });
+
+  const result = await query<GlobalOperatorAssignmentRow>(
+    `
+      INSERT INTO global_operator_assignments (user_id, global_role, active)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id, global_role)
+      DO UPDATE
+      SET active = EXCLUDED.active
+      RETURNING
+        user_id,
+        (SELECT email FROM users WHERE id = global_operator_assignments.user_id) AS email,
+        global_role,
+        active,
+        created_at
+    `,
+    [params.userId, params.globalRole, params.active ?? true],
+  );
+
+  return mapGlobalOperatorAssignment(result.rows[0]);
+}
+
+export async function findGlobalOperatorAssignment(params: {
+  userId: string;
+  globalRole?: 'support_admin' | 'global_admin' | null;
+}): Promise<GlobalOperatorAssignmentRecord | null> {
+  const values: unknown[] = [params.userId];
+  const roleFilter = params.globalRole ? `AND goa.global_role = $2` : '';
+  if (params.globalRole) {
+    values.push(params.globalRole);
+  }
+
+  const result = await query<GlobalOperatorAssignmentRow>(
+    `
+      SELECT
+        goa.user_id,
+        u.email,
+        goa.global_role,
+        goa.active,
+        goa.created_at
+      FROM global_operator_assignments goa
+      JOIN users u ON u.id = goa.user_id
+      WHERE goa.user_id = $1
+        ${roleFilter}
+        AND goa.active = TRUE
+      ORDER BY goa.created_at ASC
+      LIMIT 1
+    `,
+    values,
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapGlobalOperatorAssignment(result.rows[0]);
+}
+
+export async function createTenantImpersonationSession(params: {
+  operatorUserId: string;
+  operatorEmail: string;
+  tenantId: string;
+  workspaceId: string;
+  assumedRole?: Role;
+  expiresInMinutes?: number;
+}): Promise<TenantImpersonationSessionRecord> {
+  const minutes = Math.max(5, Math.min(params.expiresInMinutes ?? 60, 12 * 60));
+  const result = await query<TenantImpersonationSessionRow>(
+    `
+      INSERT INTO tenant_impersonation_sessions (
+        id,
+        operator_user_id,
+        operator_email,
+        tenant_id,
+        workspace_id,
+        assumed_role,
+        session_token,
+        expires_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '1 minute' * $8)
+      RETURNING *
+    `,
+    [
+      uuidv4(),
+      params.operatorUserId,
+      params.operatorEmail.toLowerCase().trim(),
+      params.tenantId,
+      params.workspaceId,
+      params.assumedRole ?? 'tenant_admin',
+      `imp_${uuidv4().replaceAll('-', '')}`,
+      minutes,
+    ],
+  );
+
+  return mapTenantImpersonationSession(result.rows[0]);
+}
+
+export async function findActiveTenantImpersonationSessionByToken(token: string): Promise<TenantImpersonationSessionRecord | null> {
+  const result = await query<TenantImpersonationSessionRow>(
+    `
+      SELECT *
+      FROM tenant_impersonation_sessions
+      WHERE session_token = $1
+        AND revoked_at IS NULL
+        AND expires_at > NOW()
+      LIMIT 1
+    `,
+    [token.trim()],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenantImpersonationSession(result.rows[0]);
+}
+
+export async function revokeTenantImpersonationSession(params: {
+  sessionToken: string;
+  operatorUserId?: string | null;
+}): Promise<boolean> {
+  const values: unknown[] = [params.sessionToken.trim()];
+  const operatorFilter = params.operatorUserId ? `AND operator_user_id = $2` : '';
+  if (params.operatorUserId) {
+    values.push(params.operatorUserId);
+  }
+
+  const result = await query<{ id: string }>(
+    `
+      UPDATE tenant_impersonation_sessions
+      SET revoked_at = NOW()
+      WHERE session_token = $1
+        ${operatorFilter}
+        AND revoked_at IS NULL
+      RETURNING id
+    `,
+    values,
+  );
+
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function ensurePersonalTenantForPortalUser(params: {
+  portalUser: PortalUserRecord;
+  displayName?: string | null;
+}): Promise<TenantRecord> {
+  const profiles = await listPortalTenantProfiles(params.portalUser.id);
+  const personalProfile = profiles.find((profile) => profile.accountType === 'personal_owner');
+  if (personalProfile) {
+    const tenant = await findTenantById(personalProfile.tenantId);
+    if (tenant) {
+      return tenant;
+    }
+  }
+
+  const emailDomain = extractEmailDomain(params.portalUser.email);
+  const tenantName =
+    (params.displayName && params.displayName.trim().length > 0
+      ? `${params.displayName.trim()}'s Workspace`
+      : `${params.portalUser.email} Workspace`);
+
+  const tenant = await createTenant({
+    name: tenantName,
+    tenantType: 'personal',
+    status: 'active',
+    primaryDomain: emailDomain,
+    features: { personalTenant: true },
+  });
+
+  await ensurePortalTenantProfile({
+    tenantId: tenant.id,
+    portalUserId: params.portalUser.id,
+    accountType: 'personal_owner',
+    homeDomain: emailDomain,
+  });
+
+  return tenant;
+}
+
+export async function resolveTenantForEmail(params: {
+  email: string;
+  requestedTenantKey?: string | null;
+  portalUser?: PortalUserRecord | null;
+  displayName?: string | null;
+}): Promise<{
+  tenant: TenantRecord;
+  accountType: 'personal_owner' | 'enterprise_member' | 'guest';
+  resolution: 'enterprise' | 'personal' | 'requested';
+}> {
+  const emailDomain = extractEmailDomain(params.email);
+
+  if (params.requestedTenantKey) {
+    const requestedTenant = await findTenantByKey(params.requestedTenantKey);
+    if (!requestedTenant) {
+      throw new Error('tenant_not_found');
+    }
+
+    const verifiedDomain = await findVerifiedTenantDomain(emailDomain);
+    const accountType =
+      verifiedDomain?.tenantId === requestedTenant.id
+        ? 'enterprise_member'
+        : requestedTenant.tenantType === 'personal'
+          ? 'personal_owner'
+          : 'guest';
+
+    return {
+      tenant: requestedTenant,
+      accountType,
+      resolution: 'requested',
+    };
+  }
+
+  const verifiedDomain = await findVerifiedTenantDomain(emailDomain);
+  if (verifiedDomain) {
+    const tenant = await findTenantById(verifiedDomain.tenantId);
+    if (!tenant) {
+      throw new Error('tenant_not_found');
+    }
+
+    return {
+      tenant,
+      accountType: tenant.tenantType === 'personal' ? 'personal_owner' : 'enterprise_member',
+      resolution: 'enterprise',
+    };
+  }
+
+  if (!params.portalUser) {
+    throw new Error('portal_user_required_for_personal_tenant');
+  }
+
+  const personalTenant = await ensurePersonalTenantForPortalUser({
+    portalUser: params.portalUser,
+    displayName: params.displayName ?? params.portalUser.displayName,
+  });
+
+  return {
+    tenant: personalTenant,
+    accountType: 'personal_owner',
+    resolution: 'personal',
+  };
+}
+
 export async function createPortalSession(params: {
   userId: string;
+  tenantId?: string | null;
+  workspaceId?: string | null;
   expiresInHours?: number;
 }): Promise<{ token: string; expiresAt: string }> {
   const id = uuidv4();
@@ -2711,11 +3959,11 @@ export async function createPortalSession(params: {
   const hours = params.expiresInHours ?? 24 * 30; // 30 days default
   const result = await query<{ token: string; expires_at: string }>(
     `
-      INSERT INTO portal_sessions (id, user_id, token, expires_at)
-      VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour' * $4)
+      INSERT INTO portal_sessions (id, user_id, tenant_id, workspace_id, token, expires_at)
+      VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '1 hour' * $6)
       RETURNING token, expires_at
     `,
-    [id, params.userId, token, hours],
+    [id, params.userId, params.tenantId ?? null, params.workspaceId ?? null, token, hours],
   );
 
   return {
@@ -2724,24 +3972,243 @@ export async function createPortalSession(params: {
   };
 }
 
-export async function findPortalUserByToken(token: string): Promise<PortalUserRecord | null> {
-  const result = await query<PortalUserRow>(
+export async function findPortalSessionContextByToken(token: string): Promise<PortalSessionContextRecord | null> {
+  const result = await query<PortalSessionContextRow>(
     `
-      SELECT pu.*
+      SELECT
+        pu.*,
+        ps.tenant_id,
+        ps.workspace_id,
+        ps.expires_at,
+        t.tenant_key,
+        t.tenant_type,
+        t.name AS tenant_name,
+        ptp.account_type
       FROM portal_sessions ps
       JOIN portal_users pu ON pu.id = ps.user_id
-      WHERE ps.token = $1 AND ps.expires_at > NOW()
+      LEFT JOIN tenants t ON t.id = ps.tenant_id
+      LEFT JOIN portal_tenant_profiles ptp
+        ON ptp.tenant_id = ps.tenant_id
+       AND ptp.portal_user_id = ps.user_id
+      WHERE ps.token = $1
+        AND ps.expires_at > NOW()
       LIMIT 1
     `,
     [token],
   );
 
-  if ((result.rowCount ?? 0) === 0) return null;
-  return mapPortalUser(result.rows[0]);
+  if ((result.rowCount ?? 0) === 0) {
+    return null;
+  }
+
+  const row = result.rows[0];
+  return {
+    user: mapPortalUser(row),
+    tenantId: row.tenant_id,
+    workspaceId: row.workspace_id,
+    expiresAt: row.expires_at,
+    tenantKey: row.tenant_key,
+    tenantType: row.tenant_type,
+    tenantName: row.tenant_name,
+    accountType: row.account_type,
+  };
+}
+
+export async function findPortalUserByToken(token: string): Promise<PortalUserRecord | null> {
+  const session = await findPortalSessionContextByToken(token);
+  return session?.user ?? null;
 }
 
 export async function deletePortalSession(token: string): Promise<void> {
   await query(`DELETE FROM portal_sessions WHERE token = $1`, [token]);
+}
+
+export async function ensureTenantVisitor(params: {
+  tenantId: string;
+  visitorKey: string;
+  expiresInHours?: number;
+}): Promise<TenantVisitorRecord> {
+  const hours = params.expiresInHours ?? 24 * 30;
+  const result = await query<TenantVisitorRow>(
+    `
+      INSERT INTO tenant_visitors (
+        id,
+        tenant_id,
+        visitor_key,
+        session_token,
+        expires_at,
+        first_seen_at,
+        last_seen_at
+      )
+      VALUES ($1, $2, $3, $4, NOW() + INTERVAL '1 hour' * $5, NOW(), NOW())
+      ON CONFLICT (tenant_id, visitor_key)
+      DO UPDATE
+      SET session_token = CASE
+            WHEN tenant_visitors.revoked_at IS NOT NULL OR tenant_visitors.expires_at <= NOW()
+              THEN EXCLUDED.session_token
+            ELSE tenant_visitors.session_token
+          END,
+          expires_at = EXCLUDED.expires_at,
+          revoked_at = NULL,
+          last_seen_at = NOW()
+      RETURNING *
+    `,
+    [
+      uuidv4(),
+      params.tenantId,
+      params.visitorKey,
+      buildTenantVisitorSessionToken(),
+      hours,
+    ],
+  );
+
+  return mapTenantVisitor(result.rows[0]);
+}
+
+export async function findActiveTenantVisitorBySessionToken(params: {
+  tenantId: string;
+  sessionToken: string;
+}): Promise<TenantVisitorRecord | null> {
+  const result = await query<TenantVisitorRow>(
+    `
+      SELECT *
+      FROM tenant_visitors
+      WHERE tenant_id = $1
+        AND session_token = $2
+        AND revoked_at IS NULL
+        AND expires_at > NOW()
+      LIMIT 1
+    `,
+    [params.tenantId, params.sessionToken.trim()],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenantVisitor(result.rows[0]);
+}
+
+export async function renewTenantVisitorSession(params: {
+  tenantVisitorId: string;
+  expiresInHours?: number;
+}): Promise<TenantVisitorRecord | null> {
+  const hours = params.expiresInHours ?? 24 * 30;
+  const result = await query<TenantVisitorRow>(
+    `
+      UPDATE tenant_visitors
+      SET
+        expires_at = NOW() + INTERVAL '1 hour' * $2,
+        revoked_at = NULL,
+        last_seen_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [params.tenantVisitorId, hours],
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapTenantVisitor(result.rows[0]);
+}
+
+export async function revokeTenantVisitorSession(params: {
+  tenantId?: string | null;
+  sessionToken: string;
+}): Promise<boolean> {
+  const values: unknown[] = [params.sessionToken.trim()];
+  const tenantFilter = params.tenantId ? `AND tenant_id = $2` : '';
+  if (params.tenantId) {
+    values.push(params.tenantId);
+  }
+
+  const result = await query<{ id: string }>(
+    `
+      UPDATE tenant_visitors
+      SET
+        revoked_at = NOW(),
+        expires_at = NOW(),
+        last_seen_at = NOW()
+      WHERE session_token = $1
+        ${tenantFilter}
+        AND revoked_at IS NULL
+      RETURNING id
+    `,
+    values,
+  );
+
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function ensureTenantActorForPortalUser(params: {
+  tenantId: string;
+  portalUserId: string;
+  email: string;
+  displayName?: string | null;
+}): Promise<TenantActorRecord> {
+  const result = await query<TenantActorRow>(
+    `
+      INSERT INTO tenant_actors (id, tenant_id, actor_type, portal_user_id, display_name, email)
+      VALUES ($1, $2, 'portal_user', $3, $4, $5)
+      ON CONFLICT (tenant_id, portal_user_id)
+      DO UPDATE
+      SET display_name = COALESCE(EXCLUDED.display_name, tenant_actors.display_name),
+          email = COALESCE(EXCLUDED.email, tenant_actors.email)
+      RETURNING *
+    `,
+    [uuidv4(), params.tenantId, params.portalUserId, params.displayName ?? null, params.email],
+  );
+
+  return mapTenantActor(result.rows[0]);
+}
+
+export async function ensureTenantActorForVisitor(params: {
+  tenantId: string;
+  visitorKey: string;
+  email?: string | null;
+  displayName?: string | null;
+}): Promise<TenantActorRecord> {
+  const visitor = await ensureTenantVisitor({
+    tenantId: params.tenantId,
+    visitorKey: params.visitorKey,
+  });
+
+  const result = await query<TenantActorRow>(
+    `
+      INSERT INTO tenant_actors (id, tenant_id, actor_type, tenant_visitor_id, display_name, email)
+      VALUES ($1, $2, 'visitor', $3, $4, $5)
+      ON CONFLICT (tenant_id, tenant_visitor_id)
+      DO UPDATE
+      SET display_name = COALESCE(EXCLUDED.display_name, tenant_actors.display_name),
+          email = COALESCE(EXCLUDED.email, tenant_actors.email)
+      RETURNING *
+    `,
+    [
+      uuidv4(),
+      params.tenantId,
+      visitor.id,
+      params.displayName ?? 'Portal Visitor',
+      params.email ?? `visitor-${params.visitorKey.slice(0, 8)}@portal.customervoice.local`,
+    ],
+  );
+
+  return mapTenantActor(result.rows[0]);
+}
+
+export async function ensureTenantActorForInternalUser(params: {
+  tenantId: string;
+  userId: string;
+  email: string;
+  displayName?: string | null;
+}): Promise<TenantActorRecord> {
+  const result = await query<TenantActorRow>(
+    `
+      INSERT INTO tenant_actors (id, tenant_id, actor_type, internal_user_id, display_name, email)
+      VALUES ($1, $2, 'internal_user', $3, $4, $5)
+      ON CONFLICT (tenant_id, internal_user_id)
+      DO UPDATE
+      SET display_name = COALESCE(EXCLUDED.display_name, tenant_actors.display_name),
+          email = COALESCE(EXCLUDED.email, tenant_actors.email)
+      RETURNING *
+    `,
+    [uuidv4(), params.tenantId, params.userId, params.displayName ?? null, params.email],
+  );
+
+  return mapTenantActor(result.rows[0]);
 }
 
 export async function createPublicIdeaComment(params: {
@@ -2804,17 +4271,22 @@ export async function createPublicIdeaComment(params: {
 export async function subscribeToIdea(params: {
   ideaId: string;
   userId: string;
+  tenantId?: string;
+  tenantActorId?: string | null;
   notifyOn?: string[];
 }): Promise<{ ideaId: string; userId: string; notifyOn: string[] }> {
   const notifyOn = params.notifyOn ?? ['status_change', 'official_response', 'new_comment'];
   const result = await query<{ idea_id: string; user_id: string; notify_on: string[] }>(
     `
-      INSERT INTO idea_subscriptions (idea_id, user_id, notify_on)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (idea_id, user_id) DO UPDATE SET notify_on = $3
+      INSERT INTO idea_subscriptions (idea_id, user_id, tenant_id, tenant_actor_id, notify_on)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (idea_id, user_id) DO UPDATE
+      SET tenant_id = COALESCE(EXCLUDED.tenant_id, idea_subscriptions.tenant_id),
+          tenant_actor_id = COALESCE(EXCLUDED.tenant_actor_id, idea_subscriptions.tenant_actor_id),
+          notify_on = $5
       RETURNING idea_id, user_id, notify_on
     `,
-    [params.ideaId, params.userId, notifyOn],
+    [params.ideaId, params.userId, params.tenantId ?? null, params.tenantActorId ?? null, notifyOn],
   );
   const row = result.rows[0];
   return { ideaId: row.idea_id, userId: row.user_id, notifyOn: row.notify_on };
@@ -2843,14 +4315,22 @@ export async function getIdeaSubscription(params: {
 
 export async function listUserSubscriptions(params: {
   userId: string;
+  tenantId?: string | null;
   limit?: number;
   offset?: number;
 }): Promise<string[]> {
   const limit = Math.max(1, Math.min(params.limit ?? 100, 200));
   const offset = Math.max(0, params.offset ?? 0);
   const result = await query<{ idea_id: string }>(
-    `SELECT idea_id FROM idea_subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-    [params.userId, limit, offset],
+    `
+      SELECT idea_id
+      FROM idea_subscriptions
+      WHERE user_id = $1
+        AND ($2::text IS NULL OR tenant_id = $2)
+      ORDER BY created_at DESC
+      LIMIT $3 OFFSET $4
+    `,
+    [params.userId, params.tenantId ?? null, limit, offset],
   );
   return result.rows.map((r) => r.idea_id);
 }
@@ -2860,10 +4340,18 @@ export async function listUserSubscriptions(params: {
 export async function favoriteIdea(params: {
   ideaId: string;
   userId: string;
+  tenantId?: string;
+  tenantActorId?: string | null;
 }): Promise<{ ideaId: string; userId: string }> {
   await query(
-    `INSERT INTO idea_favorites (idea_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-    [params.ideaId, params.userId],
+    `
+      INSERT INTO idea_favorites (idea_id, user_id, tenant_id, tenant_actor_id)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (idea_id, user_id) DO UPDATE
+      SET tenant_id = COALESCE(EXCLUDED.tenant_id, idea_favorites.tenant_id),
+          tenant_actor_id = COALESCE(EXCLUDED.tenant_actor_id, idea_favorites.tenant_actor_id)
+    `,
+    [params.ideaId, params.userId, params.tenantId ?? null, params.tenantActorId ?? null],
   );
   return { ideaId: params.ideaId, userId: params.userId };
 }
@@ -2891,14 +4379,22 @@ export async function getIdeaFavorite(params: {
 
 export async function listUserFavorites(params: {
   userId: string;
+  tenantId?: string | null;
   limit?: number;
   offset?: number;
 }): Promise<string[]> {
   const limit = Math.max(1, Math.min(params.limit ?? 100, 200));
   const offset = Math.max(0, params.offset ?? 0);
   const result = await query<{ idea_id: string }>(
-    `SELECT idea_id FROM idea_favorites WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-    [params.userId, limit, offset],
+    `
+      SELECT idea_id
+      FROM idea_favorites
+      WHERE user_id = $1
+        AND ($2::text IS NULL OR tenant_id = $2)
+      ORDER BY created_at DESC
+      LIMIT $3 OFFSET $4
+    `,
+    [params.userId, params.tenantId ?? null, limit, offset],
   );
   return result.rows.map((r) => r.idea_id);
 }
@@ -2929,6 +4425,7 @@ export async function updatePortalUserProfile(params: {
 
 export async function listUserIdeas(params: {
   userId: string;
+  tenantId?: string | null;
   limit?: number;
   offset?: number;
 }): Promise<{ id: string; title: string; status: string; voteCount: number; createdAt: string }[]> {
@@ -2946,11 +4443,13 @@ export async function listUserIdeas(params: {
         COALESCE((SELECT COUNT(*) FROM idea_votes iv WHERE iv.idea_id = i.id), 0)::int AS vote_count,
         i.created_at
       FROM ideas i
-      WHERE i.created_by = $1 AND i.active = TRUE
+      WHERE i.created_by = $1
+        AND ($2::text IS NULL OR i.tenant_id = $2)
+        AND i.active = TRUE
       ORDER BY i.created_at DESC
-      LIMIT $2 OFFSET $3
+      LIMIT $3 OFFSET $4
     `,
-    [params.userId, limit, offset],
+    [params.userId, params.tenantId ?? null, limit, offset],
   );
   return result.rows.map((r) => ({
     id: r.id,
@@ -2963,6 +4462,7 @@ export async function listUserIdeas(params: {
 
 export async function listUserVotedIdeas(params: {
   userId: string;
+  tenantId?: string | null;
   limit?: number;
   offset?: number;
 }): Promise<{ id: string; title: string; status: string; voteCount: number; createdAt: string }[]> {
@@ -2981,11 +4481,12 @@ export async function listUserVotedIdeas(params: {
         i.created_at
       FROM ideas i
       JOIN idea_votes v ON v.idea_id = i.id AND v.user_id = $1
-      WHERE i.active = TRUE
+      WHERE ($2::text IS NULL OR v.tenant_id = $2)
+        AND i.active = TRUE
       ORDER BY v.created_at DESC
-      LIMIT $2 OFFSET $3
+      LIMIT $3 OFFSET $4
     `,
-    [params.userId, limit, offset],
+    [params.userId, params.tenantId ?? null, limit, offset],
   );
   return result.rows.map((r) => ({
     id: r.id,
@@ -3180,6 +4681,8 @@ export async function createThreadedComment(params: {
   body: string;
   parentCommentId?: string;
   isInternal?: boolean;
+  tenantId?: string;
+  tenantActorId?: string | null;
 }): Promise<ThreadedCommentRecord> {
   // Check if comments are locked
   const ideaResult = await query<{ comments_locked: boolean }>(
@@ -3214,8 +4717,18 @@ export async function createThreadedComment(params: {
   const id = uuidv4();
   const result = await query<ThreadedCommentRow>(
     `
-      INSERT INTO idea_comments (id, workspace_id, idea_id, user_id, body, parent_comment_id, is_internal)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO idea_comments (
+        id,
+        workspace_id,
+        idea_id,
+        user_id,
+        tenant_id,
+        tenant_actor_id,
+        body,
+        parent_comment_id,
+        is_internal
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING
         id, workspace_id, idea_id, user_id,
         (SELECT email FROM users WHERE id = $4) AS user_email,
@@ -3227,6 +4740,8 @@ export async function createThreadedComment(params: {
       params.workspaceId,
       params.ideaId,
       params.userId,
+      params.tenantId ?? null,
+      params.tenantActorId ?? null,
       params.body,
       params.parentCommentId ?? null,
       isInternal,
@@ -3241,11 +4756,19 @@ export async function createThreadedComment(params: {
 export async function upvoteComment(params: {
   commentId: string;
   userId: string;
+  tenantId?: string;
+  tenantActorId?: string | null;
 }): Promise<{ commentId: string; upvoteCount: number }> {
   return withTransaction(async (client) => {
     await client.query(
-      `INSERT INTO comment_upvotes (comment_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [params.commentId, params.userId],
+      `
+        INSERT INTO comment_upvotes (comment_id, user_id, tenant_id, tenant_actor_id)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (comment_id, user_id) DO UPDATE
+        SET tenant_id = COALESCE(EXCLUDED.tenant_id, comment_upvotes.tenant_id),
+            tenant_actor_id = COALESCE(EXCLUDED.tenant_actor_id, comment_upvotes.tenant_actor_id)
+      `,
+      [params.commentId, params.userId, params.tenantId ?? null, params.tenantActorId ?? null],
     );
     const result = await client.query<{ upvote_count: number }>(
       `
@@ -3317,7 +4840,7 @@ export async function createPasswordResetToken(params: {
       userId: params.userId,
       resetLink,
     },
-    recipients: [{ userId: params.userId, email: params.userEmail }],
+    recipients: [{ userId: null, email: params.userEmail }],
   });
   return {
     token: result.rows[0].token,
@@ -3735,6 +5258,7 @@ function mapWebhook(row: WebhookRow): WebhookRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
+    tenantId: row.tenant_id,
     url: row.url,
     events: row.events,
     secret: row.secret,
@@ -3752,14 +5276,18 @@ export async function createWebhook(params: {
 }): Promise<WebhookRecord> {
   const id = uuidv4();
   const active = params.active ?? true;
+  const workspace = await findWorkspaceContext(params.workspaceId);
+  if (!workspace) {
+    throw new Error('workspace_not_found');
+  }
 
   const result = await query<WebhookRow>(
     `
-      INSERT INTO webhooks (id, workspace_id, url, events, secret, active)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO webhooks (id, tenant_id, workspace_id, url, events, secret, active)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `,
-    [id, params.workspaceId, params.url, params.events, params.secret, active]
+    [id, workspace.tenantId, params.workspaceId, params.url, params.events, params.secret, active]
   );
 
   return mapWebhook(result.rows[0]);
@@ -3864,6 +5392,7 @@ export async function syncPortalUserMrr(email: string, mrr: number): Promise<voi
 export interface SsoConnectionRecord {
   id: string;
   workspaceId: string;
+  tenantId: string;
   provider: 'okta' | 'azure' | 'custom_saml' | 'oidc';
   domain: string;
   clientId: string | null;
@@ -3876,6 +5405,7 @@ export interface SsoConnectionRecord {
 interface SsoConnectionRow {
   id: string;
   workspace_id: string;
+  tenant_id: string;
   provider: 'okta' | 'azure' | 'custom_saml' | 'oidc';
   domain: string;
   client_id: string | null;
@@ -3889,6 +5419,7 @@ function mapSsoConnection(row: SsoConnectionRow): SsoConnectionRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
+    tenantId: row.tenant_id,
     provider: row.provider,
     domain: row.domain,
     clientId: row.client_id,
@@ -3901,12 +5432,56 @@ function mapSsoConnection(row: SsoConnectionRow): SsoConnectionRecord {
 
 export async function findSsoConnectionByDomain(domain: string): Promise<SsoConnectionRecord | null> {
   const result = await query<SsoConnectionRow>(
-    `SELECT * FROM sso_connections WHERE domain = $1 AND active = TRUE LIMIT 1`,
-    [domain.toLowerCase().trim()]
+    `
+      SELECT *
+      FROM sso_connections
+      WHERE domain = $1
+        AND active = TRUE
+      ORDER BY created_at ASC
+      LIMIT 1
+    `,
+    [domain.toLowerCase().trim()],
   );
 
   if ((result.rowCount ?? 0) === 0) return null;
   return mapSsoConnection(result.rows[0]);
+}
+
+export async function findTenantSsoConnection(params: {
+  tenantId?: string;
+  tenantKey?: string;
+  domain?: string;
+}): Promise<SsoConnectionRecord | null> {
+  const clauses: string[] = ['sc.active = TRUE'];
+  const values: unknown[] = [];
+  let index = 1;
+
+  if (params.tenantId) {
+    clauses.push(`sc.tenant_id = $${index++}`);
+    values.push(params.tenantId);
+  }
+  if (params.tenantKey) {
+    clauses.push(`t.tenant_key = $${index++}`);
+    values.push(params.tenantKey);
+  }
+  if (params.domain) {
+    clauses.push(`LOWER(sc.domain) = LOWER($${index++})`);
+    values.push(params.domain);
+  }
+
+  const result = await query<SsoConnectionRow>(
+    `
+      SELECT sc.*
+      FROM sso_connections sc
+      JOIN tenants t ON t.id = sc.tenant_id
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY sc.created_at ASC
+      LIMIT 1
+    `,
+    values,
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapSsoConnection(result.rows[0]);
 }
 
 export async function listSsoConnections(workspaceId: string): Promise<SsoConnectionRecord[]> {
@@ -3917,8 +5492,17 @@ export async function listSsoConnections(workspaceId: string): Promise<SsoConnec
   return result.rows.map(mapSsoConnection);
 }
 
+export async function listTenantSsoConnections(tenantId: string): Promise<SsoConnectionRecord[]> {
+  const result = await query<SsoConnectionRow>(
+    `SELECT * FROM sso_connections WHERE tenant_id = $1 ORDER BY created_at DESC`,
+    [tenantId],
+  );
+  return result.rows.map(mapSsoConnection);
+}
+
 export async function createSsoConnection(params: {
   workspaceId: string;
+  tenantId?: string;
   provider: 'okta' | 'azure' | 'custom_saml' | 'oidc';
   domain: string;
   clientId?: string | null;
@@ -3927,17 +5511,22 @@ export async function createSsoConnection(params: {
   active?: boolean;
 }): Promise<SsoConnectionRecord> {
   const id = uuidv4();
+  const workspace = await findWorkspaceContext(params.workspaceId);
+  if (!workspace) {
+    throw new Error('workspace_not_found');
+  }
   const result = await query<SsoConnectionRow>(
     `
       INSERT INTO sso_connections (
-        id, workspace_id, provider, domain, client_id, client_secret, metadata_url, active
+        id, workspace_id, tenant_id, provider, domain, client_id, client_secret, metadata_url, active
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `,
     [
       id,
       params.workspaceId,
+      params.tenantId ?? workspace.tenantId,
       params.provider,
       params.domain.toLowerCase().trim(),
       params.clientId ?? null,
@@ -3991,7 +5580,7 @@ export async function updateSsoConnection(
   }
 
   if (updates.length === 0) {
-    const existing = await query<SsoConnectionRow>(
+  const existing = await query<SsoConnectionRow>(
       `SELECT * FROM sso_connections WHERE id = $1 AND workspace_id = $2 LIMIT 1`,
       [id, workspaceId],
     );
@@ -4015,4 +5604,71 @@ export async function updateSsoConnection(
   );
   if ((result.rowCount ?? 0) === 0) return null;
   return mapSsoConnection(result.rows[0]);
+}
+
+export async function updateTenantSsoConnection(
+  id: string,
+  tenantId: string,
+  params: {
+    provider?: 'okta' | 'azure' | 'custom_saml' | 'oidc';
+    domain?: string;
+    clientId?: string | null;
+    clientSecret?: string | null;
+    metadataUrl?: string | null;
+    active?: boolean;
+  },
+): Promise<SsoConnectionRecord | null> {
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (params.provider !== undefined) {
+    updates.push(`provider = $${idx++}`);
+    values.push(params.provider);
+  }
+  if (params.domain !== undefined) {
+    updates.push(`domain = $${idx++}`);
+    values.push(params.domain.toLowerCase().trim());
+  }
+  if (params.clientId !== undefined) {
+    updates.push(`client_id = $${idx++}`);
+    values.push(params.clientId);
+  }
+  if (params.clientSecret !== undefined) {
+    updates.push(`client_secret = $${idx++}`);
+    values.push(params.clientSecret);
+  }
+  if (params.metadataUrl !== undefined) {
+    updates.push(`metadata_url = $${idx++}`);
+    values.push(params.metadataUrl);
+  }
+  if (params.active !== undefined) {
+    updates.push(`active = $${idx++}`);
+    values.push(params.active);
+  }
+
+  if (updates.length === 0) {
+    const existing = await query<SsoConnectionRow>(
+      `SELECT * FROM sso_connections WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [id, tenantId],
+    );
+    return (existing.rowCount ?? 0) === 0 ? null : mapSsoConnection(existing.rows[0]);
+  }
+
+  values.push(id);
+  const idPos = idx++;
+  values.push(tenantId);
+  const tenantPos = idx++;
+
+  const result = await query<SsoConnectionRow>(
+    `
+      UPDATE sso_connections
+      SET ${updates.join(', ')}
+      WHERE id = $${idPos} AND tenant_id = $${tenantPos}
+      RETURNING *
+    `,
+    values,
+  );
+
+  return (result.rowCount ?? 0) === 0 ? null : mapSsoConnection(result.rows[0]);
 }

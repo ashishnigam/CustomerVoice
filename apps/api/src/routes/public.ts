@@ -2,7 +2,14 @@ import { Router } from 'express';
 import { createHash } from 'crypto';
 import { z } from 'zod';
 import {
+    countBoardsByLegacySlug,
+    ensurePersonalTenantForPortalUser,
+    ensurePortalTenantProfile,
+    ensureTenantActorForPortalUser,
+    ensureTenantActorForVisitor,
+    ensureTenantVisitor,
     findBoardBySlug,
+    findBoardByPublicKey,
     listIdeas,
     findIdea,
     listIdeaComments,
@@ -14,7 +21,7 @@ import {
     getBoardSettingsExtended,
     createPortalUser,
     findPortalUserByEmail,
-    findPortalUserByToken,
+    findPortalSessionContextByToken,
     createPortalSession,
     deletePortalSession,
     subscribeToIdea,
@@ -40,11 +47,26 @@ import {
     listIdeaAttachments,
     insertIdeaAttachment,
     insertCommentAttachment,
+    findDefaultWorkspaceForTenant,
+    findTenantById,
+    findTenantByKey,
+    findTenantSsoConnection,
+    findActiveTenantVisitorBySessionToken,
+    findVerifiedTenantDomain,
+    isPublicEmailProviderDomain,
+    listPortalTenantProfiles,
+    listTenantDomains,
+    listTenantSsoConnections,
+    renewTenantVisitorSession,
+    revokeTenantVisitorSession,
+    resolveTenantForEmail,
 } from '../db/repositories.js';
 import { asyncHandler } from '../lib/async-handler.js';
 import multer from 'multer';
+import { assignRequestContext } from '../lib/request-context.js';
 import { uploadFileBuffer } from '../lib/storage.js';
 import { addClient, broadcast } from '../lib/sse.js';
+import { acquireConcurrentLease, consumeFixedWindowRateLimit } from '../lib/rate-limit.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
@@ -72,11 +94,20 @@ const registerSchema = z.object({
     email: z.string().email().max(255),
     password: z.string().min(6).max(128),
     displayName: z.string().trim().min(1).max(100).optional(),
+    tenantKey: z.string().trim().min(3).max(80).optional(),
 });
 
 const loginSchema = z.object({
     email: z.string().email().max(255),
     password: z.string().min(1).max(128),
+    tenantKey: z.string().trim().min(3).max(80).optional(),
+});
+
+const tenantResolveSchema = z.object({
+    email: z.string().email().max(255).optional(),
+    domain: z.string().trim().min(3).max(255).optional(),
+}).refine((value) => Boolean(value.email || value.domain), {
+    message: 'email_or_domain_required',
 });
 
 const submitIdeaSchema = z.object({
@@ -96,10 +127,38 @@ const profileUpdateSchema = z.object({
     avatarUrl: z.string().url().max(2000).optional(),
 });
 
-const ANON_USER_ID = '00000000-0000-0000-0000-000000000001';
+const publicBoardRoutePatterns = {
+    board: ['/public/boards/:boardSlug', '/public/t/:tenantKey/boards/:boardPublicKey'],
+    settings: ['/public/boards/:boardSlug/settings', '/public/t/:tenantKey/boards/:boardPublicKey/settings'],
+    stream: ['/public/boards/:boardSlug/stream', '/public/t/:tenantKey/boards/:boardPublicKey/stream'],
+    ideas: ['/public/boards/:boardSlug/ideas', '/public/t/:tenantKey/boards/:boardPublicKey/ideas'],
+    ideaDetail: ['/public/boards/:boardSlug/ideas/:ideaId', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId'],
+    ideaAttachments: ['/public/boards/:boardSlug/ideas/:ideaId/attachments', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId/attachments'],
+    categories: ['/public/boards/:boardSlug/categories', '/public/t/:tenantKey/boards/:boardPublicKey/categories'],
+    votes: ['/public/boards/:boardSlug/ideas/:ideaId/votes', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId/votes'],
+    comments: ['/public/boards/:boardSlug/ideas/:ideaId/comments', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId/comments'],
+    commentAttachments: ['/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/attachments', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId/comments/:commentId/attachments'],
+    subscribe: ['/public/boards/:boardSlug/ideas/:ideaId/subscribe', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId/subscribe'],
+    favorite: ['/public/boards/:boardSlug/ideas/:ideaId/favorite', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId/favorite'],
+    changelog: ['/public/boards/:boardSlug/changelog', '/public/t/:tenantKey/boards/:boardPublicKey/changelog'],
+    commentUpvote: ['/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/upvote', '/public/t/:tenantKey/boards/:boardPublicKey/ideas/:ideaId/comments/:commentId/upvote'],
+} as const;
 
-function getVisitorId(req: { header: (name: string) => string | undefined }): string {
-    return req.header('x-visitor-id') ?? ANON_USER_ID;
+const tenantVisitorTokenHeader = 'x-tenant-visitor-token';
+const tenantVisitorExpiresAtHeader = 'x-tenant-visitor-expires-at';
+const tenantVisitorTenantHeader = 'x-tenant-visitor-tenant';
+
+function getVisitorId(req: {
+    header: (name: string) => string | undefined;
+    ip?: string;
+}): string {
+    const headerValue = req.header('x-visitor-id')?.trim();
+    if (headerValue && headerValue.length > 0) {
+        return headerValue;
+    }
+
+    const fingerprint = `${req.ip ?? 'unknown'}:${req.header('user-agent') ?? 'browser'}`;
+    return `visitor_${createHash('sha256').update(fingerprint).digest('hex').slice(0, 24)}`;
 }
 
 function parseCategoryIds(value?: string): string[] | undefined {
@@ -119,17 +178,164 @@ async function ensureVisitor(visitorId: string): Promise<void> {
     });
 }
 
-async function getPortalUser(req: { header: (name: string) => string | undefined }) {
+async function getPortalSession(req: { header: (name: string) => string | undefined }) {
     const authHeader = req.header('authorization');
     if (!authHeader?.startsWith('Bearer ')) return null;
     const token = authHeader.slice(7).trim();
     if (!token || token.length === 0) return null;
-    return findPortalUserByToken(token);
+    return findPortalSessionContextByToken(token);
 }
 
-type PortalUserRecord = NonNullable<Awaited<ReturnType<typeof findPortalUserByToken>>>;
-type PublicBoardRecord = NonNullable<Awaited<ReturnType<typeof findBoardBySlug>>>;
+type PortalSessionRecord = NonNullable<Awaited<ReturnType<typeof findPortalSessionContextByToken>>>;
+type PublicBoardRecord = NonNullable<Awaited<ReturnType<typeof findBoardByPublicKey>>>;
 type BoardSettingsExtended = Awaited<ReturnType<typeof getBoardSettingsExtended>>;
+type TenantVisitorSessionRecord = Awaited<ReturnType<typeof ensureTenantVisitor>>;
+
+function decorateBoard(board: PublicBoardRecord) {
+    return {
+        ...board,
+        canonicalPath: `/portal/t/${board.tenantKey}/boards/${board.publicBoardKey}`,
+        legacyPath: `/portal/boards/${board.slug}`,
+    };
+}
+
+function sanitizeBoardSettings(settings: BoardSettingsExtended, accessMode: BoardSettingsExtended['accessMode']) {
+    return {
+        ...settings,
+        allowedDomains: [],
+        allowedEmails: [],
+        _accessRestricted: true,
+        _accessMode: accessMode,
+    };
+}
+
+function getTenantVisitorToken(req: {
+    header: (name: string) => string | undefined;
+    query?: Record<string, unknown>;
+}): string | null {
+    const token = req.header(tenantVisitorTokenHeader)?.trim();
+    if (token && token.length > 0) {
+        return token;
+    }
+
+    const queryToken = typeof req.query?.visitorToken === 'string' ? req.query.visitorToken.trim() : '';
+    return queryToken.length > 0 ? queryToken : null;
+}
+
+function setTenantVisitorHeaders(
+    res: { setHeader: (name: string, value: string) => void },
+    visitor: TenantVisitorSessionRecord,
+    tenantKey: string | null,
+): void {
+    res.setHeader(tenantVisitorTokenHeader, visitor.sessionToken);
+    res.setHeader(tenantVisitorExpiresAtHeader, visitor.expiresAt);
+    if (tenantKey) {
+        res.setHeader(tenantVisitorTenantHeader, tenantKey);
+    }
+}
+
+async function hydrateTenantVisitorSession(params: {
+    req: { header: (name: string) => string | undefined; ip?: string };
+    res: { setHeader: (name: string, value: string) => void };
+    tenantId: string;
+    tenantKey: string | null;
+}): Promise<TenantVisitorSessionRecord> {
+    const existingToken = getTenantVisitorToken(params.req);
+    if (existingToken) {
+        const existing = await findActiveTenantVisitorBySessionToken({
+            tenantId: params.tenantId,
+            sessionToken: existingToken,
+        });
+
+        if (existing) {
+            const renewed = await renewTenantVisitorSession({ tenantVisitorId: existing.id });
+            if (renewed) {
+                setTenantVisitorHeaders(params.res, renewed, params.tenantKey);
+                return renewed;
+            }
+        }
+    }
+
+    const visitorKey = getVisitorId(params.req);
+    await ensureVisitor(visitorKey);
+    const visitor = await ensureTenantVisitor({
+        tenantId: params.tenantId,
+        visitorKey,
+    });
+
+    setTenantVisitorHeaders(params.res, visitor, params.tenantKey);
+    return visitor;
+}
+
+function enforceTenantRateLimit(tenantId: string, scope: string, res: { status: (code: number) => { json: (body: unknown) => void } }): boolean {
+    const limit = scope === 'sso' ? 30 : scope === 'tenant_resolve' ? 60 : 240;
+    const windowMs = 60_000;
+    const result = consumeFixedWindowRateLimit({
+        bucket: `${scope}:${tenantId}`,
+        limit,
+        windowMs,
+    });
+
+    if (!result.allowed) {
+        res.status(429).json({
+            error: 'rate_limit_exceeded',
+            retryAfterMs: result.retryAfterMs,
+        });
+        return false;
+    }
+
+    return true;
+}
+
+async function resolveBoardFromRequest(
+    req: { params: Record<string, string | string[] | undefined> },
+    res: { status: (code: number) => { json: (body: unknown) => void } },
+): Promise<PublicBoardRecord | null> {
+    const tenantKeyParam = Array.isArray(req.params.tenantKey) ? req.params.tenantKey[0] : req.params.tenantKey;
+    const boardPublicKeyParam = Array.isArray(req.params.boardPublicKey) ? req.params.boardPublicKey[0] : req.params.boardPublicKey;
+    if (tenantKeyParam && boardPublicKeyParam) {
+        const board = await findBoardByPublicKey({
+            tenantKey: String(tenantKeyParam),
+            publicBoardKey: String(boardPublicKeyParam),
+            onlyPublic: false,
+        });
+
+        if (!board) {
+            res.status(404).json({ error: 'board_not_found' });
+            return null;
+        }
+
+        assignRequestContext({
+            tenantId: board.tenantId,
+            tenantKey: board.tenantKey,
+            workspaceId: board.workspaceId,
+            boardId: board.id,
+        });
+        return board;
+    }
+
+    const slugParam = Array.isArray(req.params.boardSlug) ? req.params.boardSlug[0] : req.params.boardSlug;
+    const slug = String(slugParam ?? '');
+    const board = await findBoardBySlug({ slug, onlyPublic: false });
+    if (!board) {
+        const legacyCount = await countBoardsByLegacySlug({ slug, onlyPublic: false });
+        if (legacyCount > 1) {
+            res.status(409).json({ error: 'legacy_board_ambiguous' });
+            return null;
+        }
+
+        res.status(404).json({ error: 'board_not_found' });
+        return null;
+    }
+
+    assignRequestContext({
+        tenantId: board.tenantId,
+        tenantKey: board.tenantKey,
+        workspaceId: board.workspaceId,
+        boardId: board.id,
+    });
+    return board;
+}
 
 function isAllowedByDomainOrEmail(email: string, settings: BoardSettingsExtended): boolean {
     const normalizedEmail = email.trim().toLowerCase();
@@ -147,31 +353,110 @@ function isAllowedByDomainOrEmail(email: string, settings: BoardSettingsExtended
     return emailAllowed || domainAllowed;
 }
 
+async function resolveBoardActorContext(params: {
+    req: { header: (name: string) => string | undefined; ip?: string };
+    res: { setHeader: (name: string, value: string) => void };
+    board: PublicBoardRecord;
+    portalSession: PortalSessionRecord | null;
+    visitorSession?: TenantVisitorSessionRecord | null;
+}): Promise<{
+    userId: string;
+    userEmail: string;
+    tenantActorId: string;
+}> {
+    if (params.portalSession) {
+        const emailDomain = params.portalSession.user.email.split('@')[1]?.trim().toLowerCase() ?? '';
+        const verifiedDomain = emailDomain ? await findVerifiedTenantDomain(emailDomain) : null;
+        const accountType =
+            params.portalSession.tenantId === params.board.tenantId && params.portalSession.tenantType === 'personal'
+                ? 'personal_owner'
+                : verifiedDomain?.tenantId === params.board.tenantId
+                    ? 'enterprise_member'
+                    : 'guest';
+
+        await ensurePortalTenantProfile({
+            tenantId: params.board.tenantId,
+            portalUserId: params.portalSession.user.id,
+            accountType,
+            homeDomain: emailDomain || null,
+        });
+
+        await ensureUser({
+            userId: params.portalSession.user.id,
+            email: params.portalSession.user.email,
+            displayName: params.portalSession.user.displayName ?? undefined,
+        });
+
+        const actor = await ensureTenantActorForPortalUser({
+            tenantId: params.board.tenantId,
+            portalUserId: params.portalSession.user.id,
+            email: params.portalSession.user.email,
+            displayName: params.portalSession.user.displayName,
+        });
+
+        return {
+            userId: params.portalSession.user.id,
+            userEmail: params.portalSession.user.email,
+            tenantActorId: actor.id,
+        };
+    }
+
+    const visitorSession = params.visitorSession ?? await hydrateTenantVisitorSession({
+        req: params.req,
+        res: params.res,
+        tenantId: params.board.tenantId,
+        tenantKey: params.board.tenantKey,
+    });
+    const visitorId = visitorSession.visitorKey;
+    const actor = await ensureTenantActorForVisitor({
+        tenantId: params.board.tenantId,
+        visitorKey: visitorId,
+    });
+
+    return {
+        userId: visitorId,
+        userEmail: actor.email ?? `visitor-${visitorId.slice(0, 8)}@portal.customervoice.local`,
+        tenantActorId: actor.id,
+    };
+}
+
 async function enforceBoardAccess(
-    req: { header: (name: string) => string | undefined },
+    req: { header: (name: string) => string | undefined; ip?: string },
     res: {
         status: (code: number) => {
             json: (body: unknown) => void;
         };
+        setHeader: (name: string, value: string) => void;
     },
     board: PublicBoardRecord,
     options: { allowRestrictedMetadata?: boolean } = {},
 ): Promise<{
     granted: boolean;
-    portalUser: PortalUserRecord | null;
+    portalUser: PortalSessionRecord | null;
+    visitorSession: TenantVisitorSessionRecord | null;
     settings: BoardSettingsExtended;
 }> {
     const settings = await getBoardSettingsExtended(board.id);
-    const portalUser = await getPortalUser(req);
+    const portalSession = await getPortalSession(req);
 
-    if (settings.accessMode === 'public' || settings.accessMode === 'link_only') {
-        return { granted: true, portalUser, settings };
+    if (!enforceTenantRateLimit(board.tenantId, 'public_api', res)) {
+        return { granted: false, portalUser: null, visitorSession: null, settings };
     }
 
-    if (!portalUser) {
+    if (settings.accessMode === 'public' || settings.accessMode === 'link_only') {
+        const visitorSession = portalSession ? null : await hydrateTenantVisitorSession({
+            req,
+            res,
+            tenantId: board.tenantId,
+            tenantKey: board.tenantKey,
+        });
+        return { granted: true, portalUser: portalSession, visitorSession, settings };
+    }
+
+    if (!portalSession) {
         if (options.allowRestrictedMetadata) {
             res.status(200).json({
-                ...board,
+                ...decorateBoard(board),
                 _accessRestricted: true,
                 _accessMode: settings.accessMode,
                 _accessDeniedReason: 'auth_required',
@@ -180,13 +465,13 @@ async function enforceBoardAccess(
             res.status(401).json({ error: 'auth_required', accessMode: settings.accessMode });
         }
 
-        return { granted: false, portalUser: null, settings };
+        return { granted: false, portalUser: null, visitorSession: null, settings };
     }
 
-    if (settings.accessMode === 'domain_restricted' && !isAllowedByDomainOrEmail(portalUser.email, settings)) {
+    if (settings.accessMode === 'domain_restricted' && !isAllowedByDomainOrEmail(portalSession.user.email, settings)) {
         if (options.allowRestrictedMetadata) {
             res.status(200).json({
-                ...board,
+                ...decorateBoard(board),
                 _accessRestricted: true,
                 _accessMode: settings.accessMode,
                 _accessDeniedReason: 'domain_not_allowed',
@@ -195,28 +480,159 @@ async function enforceBoardAccess(
             res.status(403).json({ error: 'domain_not_allowed' });
         }
 
-        return { granted: false, portalUser, settings };
+        return { granted: false, portalUser: portalSession, visitorSession: null, settings };
     }
 
-    return { granted: true, portalUser, settings };
+    return { granted: true, portalUser: portalSession, visitorSession: null, settings };
 }
 
 export const publicRouter = Router();
 
+publicRouter.post(
+    '/public/tenant/resolve',
+    asyncHandler(async (req, res) => {
+        const parsed = tenantResolveSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ error: 'invalid_payload', details: parsed.error.flatten() });
+            return;
+        }
+
+        const inputDomain = parsed.data.email
+            ? parsed.data.email.split('@')[1]?.trim().toLowerCase() ?? ''
+            : parsed.data.domain?.trim().toLowerCase() ?? '';
+
+        const resolvedDomain = await findVerifiedTenantDomain(inputDomain);
+        if (resolvedDomain) {
+            const tenant = await findTenantById(resolvedDomain.tenantId);
+            if (!tenant) {
+                res.status(404).json({ error: 'tenant_not_found' });
+                return;
+            }
+
+            assignRequestContext({
+                tenantId: tenant.id,
+                tenantKey: tenant.tenantKey,
+                domain: inputDomain,
+            });
+
+            if (!enforceTenantRateLimit(tenant.id, 'tenant_resolve', res)) {
+                return;
+            }
+
+            const ssoConnections = await listTenantSsoConnections(tenant.id);
+            res.status(200).json({
+                resolution: 'enterprise',
+                domain: inputDomain,
+                publicEmailProvider: false,
+                personalTenantFallback: false,
+                tenant: {
+                    id: tenant.id,
+                    tenantKey: tenant.tenantKey,
+                    name: tenant.name,
+                    tenantType: tenant.tenantType,
+                    primaryDomain: tenant.primaryDomain,
+                },
+                loginOptions: {
+                    passwordAvailable: true,
+                    ssoAvailable: ssoConnections.some((connection) => connection.active),
+                },
+            });
+            return;
+        }
+
+        res.status(200).json({
+            resolution: 'personal',
+            domain: inputDomain,
+            publicEmailProvider: isPublicEmailProviderDomain(inputDomain),
+            personalTenantFallback: true,
+            tenant: null,
+            loginOptions: {
+                passwordAvailable: true,
+                ssoAvailable: false,
+            },
+        });
+    }),
+);
+
+publicRouter.get(
+    '/public/tenant/:tenantKey',
+    asyncHandler(async (req, res) => {
+        const tenantKey = String(req.params.tenantKey);
+        const tenant = await findTenantByKey(tenantKey);
+        if (!tenant) {
+            res.status(404).json({ error: 'tenant_not_found' });
+            return;
+        }
+
+        assignRequestContext({
+            tenantId: tenant.id,
+            tenantKey: tenant.tenantKey,
+        });
+
+        if (!enforceTenantRateLimit(tenant.id, 'tenant_resolve', res)) {
+            return;
+        }
+
+        const [domains, ssoConnections] = await Promise.all([
+            listTenantDomains(tenant.id),
+            listTenantSsoConnections(tenant.id),
+        ]);
+
+        res.status(200).json({
+            tenant: {
+                id: tenant.id,
+                tenantKey: tenant.tenantKey,
+                name: tenant.name,
+                tenantType: tenant.tenantType,
+                status: tenant.status,
+                primaryDomain: tenant.primaryDomain,
+            },
+            domains: domains.map((domain) => ({
+                id: domain.id,
+                domain: domain.domain,
+                isPrimary: domain.isPrimary,
+                verificationStatus: domain.verificationStatus,
+            })),
+            loginOptions: {
+                passwordAvailable: true,
+                ssoAvailable: ssoConnections.some((connection) => connection.active),
+            },
+        });
+    }),
+);
+
+publicRouter.get(
+    '/public/legacy/boards/:boardSlug/resolve',
+    asyncHandler(async (req, res) => {
+        const board = await resolveBoardFromRequest(req, res);
+        if (!board) {
+            return;
+        }
+
+        res.status(200).json(decorateBoard(board));
+    }),
+);
+
 /* ── GET /public/boards/:boardSlug/stream ── */
 publicRouter.get(
-    '/public/boards/:boardSlug/stream',
+    [...publicBoardRoutePatterns.stream],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
         const access = await enforceBoardAccess(req, res, board);
         if (!access.granted) {
+            return;
+        }
+
+        const lease = acquireConcurrentLease({
+            bucket: `sse:${board.tenantId}`,
+            limit: 40,
+        });
+        if (!lease.allowed) {
+            res.status(429).json({ error: 'sse_tenant_limit_reached' });
             return;
         }
 
@@ -226,19 +642,17 @@ publicRouter.get(
         // Prevent buffering in proxies
         res.flushHeaders();
 
-        addClient(board.id, res);
+        res.on('close', lease.release);
+        addClient(`${board.tenantId}:${board.id}`, res);
     }),
 );
 
 /* ── GET /public/boards/:boardSlug ── */
 publicRouter.get(
-    '/public/boards/:boardSlug',
+    [...publicBoardRoutePatterns.board],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -247,36 +661,58 @@ publicRouter.get(
             return;
         }
 
-        res.status(200).json(board);
+        res.status(200).json(decorateBoard(board));
     }),
 );
 
 /* ── GET /public/boards/:boardSlug/settings ── */
 publicRouter.get(
-    '/public/boards/:boardSlug/settings',
+    [...publicBoardRoutePatterns.settings],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
         const settings = await getBoardSettingsExtended(board.id);
+        if (!enforceTenantRateLimit(board.tenantId, 'public_api', res)) {
+            return;
+        }
+
+        const portalSession = await getPortalSession(req);
+        if (settings.accessMode === 'public' || settings.accessMode === 'link_only') {
+            if (!portalSession) {
+                await hydrateTenantVisitorSession({
+                    req,
+                    res,
+                    tenantId: board.tenantId,
+                    tenantKey: board.tenantKey,
+                });
+            }
+            res.status(200).json(settings);
+            return;
+        }
+
+        if (!portalSession) {
+            res.status(200).json(sanitizeBoardSettings(settings, settings.accessMode));
+            return;
+        }
+
+        if (settings.accessMode === 'domain_restricted' && !isAllowedByDomainOrEmail(portalSession.user.email, settings)) {
+            res.status(200).json(sanitizeBoardSettings(settings, settings.accessMode));
+            return;
+        }
+
         res.status(200).json(settings);
     }),
 );
 
 /* ── GET /public/boards/:boardSlug/ideas ── */
 publicRouter.get(
-    '/public/boards/:boardSlug/ideas',
+    [...publicBoardRoutePatterns.ideas],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -291,7 +727,7 @@ publicRouter.get(
             return;
         }
 
-        const visitorId = access.portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.user.id ?? access.visitorSession?.visitorKey ?? getVisitorId(req);
 
         const items = await listIdeas({
             workspaceId: board.workspaceId,
@@ -312,13 +748,10 @@ publicRouter.get(
 
 /* ── GET /public/boards/:boardSlug/ideas/:ideaId ── */
 publicRouter.get(
-    '/public/boards/:boardSlug/ideas/:ideaId',
+    [...publicBoardRoutePatterns.ideaDetail],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -328,7 +761,7 @@ publicRouter.get(
         }
 
         const ideaId = String(req.params.ideaId);
-        const visitorId = access.portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.user.id ?? access.visitorSession?.visitorKey ?? getVisitorId(req);
 
         const idea = await findIdea({
             workspaceId: board.workspaceId,
@@ -353,8 +786,8 @@ publicRouter.get(
         let isFavorited = false;
         if (access.portalUser) {
             [isSubscribed, isFavorited] = await Promise.all([
-                getIdeaSubscription({ ideaId: idea.id, userId: access.portalUser.id }),
-                getIdeaFavorite({ ideaId: idea.id, userId: access.portalUser.id }),
+                getIdeaSubscription({ ideaId: idea.id, userId: access.portalUser.user.id }),
+                getIdeaFavorite({ ideaId: idea.id, userId: access.portalUser.user.id }),
             ]);
         }
 
@@ -369,14 +802,11 @@ publicRouter.get(
 
 /* ── POST /public/boards/:boardSlug/ideas/:ideaId/attachments ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas/:ideaId/attachments',
+    [...publicBoardRoutePatterns.ideaAttachments],
     upload.single('file'),
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -396,14 +826,14 @@ publicRouter.post(
         }
 
         const ideaId = String(req.params.ideaId);
-        const visitorId = access.portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.user.id ?? access.visitorSession?.visitorKey ?? getVisitorId(req);
         const { buffer, originalname, mimetype, size } = req.file;
 
         const fileUrl = await uploadFileBuffer(
             buffer,
             originalname,
             mimetype,
-            `workspaces/${board.workspaceId}/boards/${board.id}/ideas/${ideaId}`
+            `tenants/${board.tenantId}/workspaces/${board.workspaceId}/boards/${board.id}/ideas/${ideaId}`
         );
 
         const attachmentRecord = await insertIdeaAttachment({
@@ -423,13 +853,10 @@ publicRouter.post(
 
 /* ── GET /public/boards/:boardSlug/categories ── */
 publicRouter.get(
-    '/public/boards/:boardSlug/categories',
+    [...publicBoardRoutePatterns.categories],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -448,13 +875,10 @@ publicRouter.get(
 
 /* ── POST /public/boards/:boardSlug/ideas/:ideaId/votes ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas/:ideaId/votes',
+    [...publicBoardRoutePatterns.votes],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -469,38 +893,33 @@ publicRouter.post(
         }
 
         const ideaId = String(req.params.ideaId);
-        const userId = access.portalUser?.id ?? getVisitorId(req);
-
-        if (!access.portalUser) {
-            await ensureVisitor(userId);
-        } else {
-            await ensureUser({
-                userId: access.portalUser.id,
-                email: access.portalUser.email,
-                displayName: access.portalUser.displayName ?? undefined,
-            });
-        }
+        const actorContext = await resolveBoardActorContext({
+            req,
+            res,
+            board,
+            portalSession: access.portalUser,
+            visitorSession: access.visitorSession,
+        });
 
         const vote = await voteIdea({
             workspaceId: board.workspaceId,
             ideaId,
-            userId,
+            userId: actorContext.userId,
+            tenantId: board.tenantId,
+            tenantActorId: actorContext.tenantActorId,
         });
 
-        broadcast(board.id, 'idea.voted', { ideaId, delta: 1 });
+        broadcast(`${board.tenantId}:${board.id}`, 'idea.voted', { ideaId, delta: 1 });
         res.status(200).json(vote);
     }),
 );
 
 /* ── DELETE /public/boards/:boardSlug/ideas/:ideaId/votes ── */
 publicRouter.delete(
-    '/public/boards/:boardSlug/ideas/:ideaId/votes',
+    [...publicBoardRoutePatterns.votes],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -510,7 +929,7 @@ publicRouter.delete(
         }
 
         const ideaId = String(req.params.ideaId);
-        const userId = access.portalUser?.id ?? getVisitorId(req);
+        const userId = access.portalUser?.user.id ?? access.visitorSession?.visitorKey ?? getVisitorId(req);
 
         const vote = await unvoteIdea({
             workspaceId: board.workspaceId,
@@ -518,20 +937,17 @@ publicRouter.delete(
             userId,
         });
 
-        broadcast(board.id, 'idea.voted', { ideaId, delta: -1 });
+        broadcast(`${board.tenantId}:${board.id}`, 'idea.voted', { ideaId, delta: -1 });
         res.status(200).json(vote);
     }),
 );
 
 /* ── POST /public/boards/:boardSlug/ideas — Submit New Idea ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas',
+    [...publicBoardRoutePatterns.ideas],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -556,26 +972,23 @@ publicRouter.post(
             return;
         }
 
-        let creatorId: string;
-        if (access.portalUser) {
-            creatorId = access.portalUser.id;
-            await ensureUser({
-                userId: access.portalUser.id,
-                email: access.portalUser.email,
-                displayName: access.portalUser.displayName ?? undefined,
-            });
-        } else {
-            creatorId = getVisitorId(req);
-            await ensureVisitor(creatorId);
-        }
+        const actorContext = await resolveBoardActorContext({
+            req,
+            res,
+            board,
+            portalSession: access.portalUser,
+            visitorSession: access.visitorSession,
+        });
 
         const idea = await createIdea({
             workspaceId: board.workspaceId,
             boardId: board.id,
+            tenantId: board.tenantId,
+            tenantActorId: actorContext.tenantActorId,
             title: parsed.data.title,
             description: parsed.data.description,
             categoryIds: parsed.data.categoryIds,
-            createdBy: creatorId,
+            createdBy: actorContext.userId,
         });
 
         res.status(201).json(idea);
@@ -584,13 +997,10 @@ publicRouter.post(
 
 /* ── POST /public/boards/:boardSlug/ideas/:ideaId/comments — Post Comment ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas/:ideaId/comments',
+    [...publicBoardRoutePatterns.comments],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -616,30 +1026,29 @@ publicRouter.post(
         }
 
         const ideaId = String(req.params.ideaId);
-        let userId: string;
-        let userEmail: string;
-
-        if (access.portalUser) {
-            userId = access.portalUser.id;
-            userEmail = access.portalUser.email;
-        } else {
-            userId = getVisitorId(req);
-            userEmail = `visitor-${userId.slice(0, 8)}@portal.customervoice.local`;
-        }
+        const actorContext = await resolveBoardActorContext({
+            req,
+            res,
+            board,
+            portalSession: access.portalUser,
+            visitorSession: access.visitorSession,
+        });
 
         try {
-                const comment = await createThreadedComment({
-                    workspaceId: board.workspaceId,
-                    ideaId,
-                    userId,
-                    userEmail,
-                    body: parsed.data.body,
-                    parentCommentId: parsed.data.parentCommentId,
-                    isInternal: parsed.data.isInternal ?? false,
-                });
+            const comment = await createThreadedComment({
+                workspaceId: board.workspaceId,
+                ideaId,
+                userId: actorContext.userId,
+                userEmail: actorContext.userEmail,
+                tenantId: board.tenantId,
+                tenantActorId: actorContext.tenantActorId,
+                body: parsed.data.body,
+                parentCommentId: parsed.data.parentCommentId,
+                isInternal: parsed.data.isInternal ?? false,
+            });
 
             if (!comment.isInternal) {
-                broadcast(board.id, 'comment.created', { ideaId, comment });
+                broadcast(`${board.tenantId}:${board.id}`, 'comment.created', { ideaId, comment });
             }
             res.status(201).json(comment);
         } catch (err) {
@@ -658,14 +1067,11 @@ publicRouter.post(
 
 /* ── POST /public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/attachments ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/attachments',
+    [...publicBoardRoutePatterns.commentAttachments],
     upload.single('file'),
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -686,14 +1092,14 @@ publicRouter.post(
 
         const ideaId = String(req.params.ideaId);
         const commentId = String(req.params.commentId);
-        const visitorId = access.portalUser?.id ?? getVisitorId(req);
+        const visitorId = access.portalUser?.user.id ?? access.visitorSession?.visitorKey ?? getVisitorId(req);
         const { buffer, originalname, mimetype, size } = req.file;
 
         const fileUrl = await uploadFileBuffer(
             buffer,
             originalname,
             mimetype,
-            `workspaces/${board.workspaceId}/boards/${board.id}/ideas/${ideaId}/comments/${commentId}`
+            `tenants/${board.tenantId}/workspaces/${board.workspaceId}/boards/${board.id}/ideas/${ideaId}/comments/${commentId}`
         );
 
         const attachmentRecord = await insertCommentAttachment({
@@ -735,12 +1141,48 @@ publicRouter.post(
             passwordHash,
         });
 
-        const session = await createPortalSession({ userId: user.id });
+        let tenantResolution;
+        try {
+            tenantResolution = await resolveTenantForEmail({
+                email: parsed.data.email,
+                requestedTenantKey: parsed.data.tenantKey ?? null,
+                portalUser: user,
+                displayName: parsed.data.displayName ?? null,
+            });
+        } catch (error) {
+            if (error instanceof Error && error.message === 'tenant_not_found') {
+                res.status(404).json({ error: 'tenant_not_found' });
+                return;
+            }
+            throw error;
+        }
+
+        const { tenant, accountType } = tenantResolution;
+
+        await ensurePortalTenantProfile({
+            tenantId: tenant.id,
+            portalUserId: user.id,
+            accountType,
+            homeDomain: parsed.data.email.split('@')[1]?.trim().toLowerCase() ?? null,
+        });
+
+        const workspace = await findDefaultWorkspaceForTenant(tenant.id);
+        const session = await createPortalSession({
+            userId: user.id,
+            tenantId: tenant.id,
+            workspaceId: workspace?.id ?? null,
+        });
 
         res.status(201).json({
             user,
             token: session.token,
             expiresAt: session.expiresAt,
+            tenant: {
+                id: tenant.id,
+                tenantKey: tenant.tenantKey,
+                tenantType: tenant.tenantType,
+                accountType,
+            },
         });
     }),
 );
@@ -767,12 +1209,91 @@ publicRouter.post(
             return;
         }
 
-        const session = await createPortalSession({ userId: record.user.id });
+        let tenant = null as NonNullable<Awaited<ReturnType<typeof findTenantById>>> | null;
+        let accountType: 'personal_owner' | 'enterprise_member' | 'guest';
+        const existingProfiles = await listPortalTenantProfiles(record.user.id);
+
+        if (!parsed.data.tenantKey && existingProfiles.length > 1) {
+            const tenantSummaries = await Promise.all(
+                existingProfiles.map(async (profile) => {
+                    const profileTenant = await findTenantById(profile.tenantId);
+                    return profileTenant
+                        ? {
+                            id: profileTenant.id,
+                            tenantKey: profileTenant.tenantKey,
+                            name: profileTenant.name,
+                            tenantType: profileTenant.tenantType,
+                            accountType: profile.accountType,
+                        }
+                        : null;
+                }),
+            );
+
+            res.status(409).json({
+                error: 'tenant_selection_required',
+                tenants: tenantSummaries.filter(Boolean),
+            });
+            return;
+        }
+
+        if (!parsed.data.tenantKey && existingProfiles.length === 1) {
+            const profileTenant = await findTenantById(existingProfiles[0].tenantId);
+            if (!profileTenant) {
+                res.status(404).json({ error: 'tenant_not_found' });
+                return;
+            }
+
+            tenant = profileTenant;
+            accountType = existingProfiles[0].accountType;
+        } else {
+            let resolved;
+            try {
+                resolved = await resolveTenantForEmail({
+                    email: parsed.data.email,
+                    requestedTenantKey: parsed.data.tenantKey ?? null,
+                    portalUser: record.user,
+                    displayName: record.user.displayName,
+                });
+            } catch (error) {
+                if (error instanceof Error && error.message === 'tenant_not_found') {
+                    res.status(404).json({ error: 'tenant_not_found' });
+                    return;
+                }
+                throw error;
+            }
+            tenant = resolved.tenant;
+            accountType = resolved.accountType;
+        }
+
+        if (!tenant) {
+            res.status(404).json({ error: 'tenant_not_found' });
+            return;
+        }
+
+        await ensurePortalTenantProfile({
+            tenantId: tenant.id,
+            portalUserId: record.user.id,
+            accountType,
+            homeDomain: parsed.data.email.split('@')[1]?.trim().toLowerCase() ?? null,
+        });
+
+        const workspace = await findDefaultWorkspaceForTenant(tenant.id);
+        const session = await createPortalSession({
+            userId: record.user.id,
+            tenantId: tenant.id,
+            workspaceId: workspace?.id ?? null,
+        });
 
         res.status(200).json({
             user: record.user,
             token: session.token,
             expiresAt: session.expiresAt,
+            tenant: {
+                id: tenant.id,
+                tenantKey: tenant.tenantKey,
+                tenantType: tenant.tenantType,
+                accountType,
+            },
         });
     }),
 );
@@ -781,13 +1302,23 @@ publicRouter.post(
 publicRouter.get(
     '/public/auth/me',
     asyncHandler(async (req, res) => {
-        const user = await getPortalUser(req);
-        if (!user) {
+        const session = await getPortalSession(req);
+        if (!session) {
             res.status(401).json({ error: 'not_authenticated' });
             return;
         }
 
-        res.status(200).json({ user });
+        res.status(200).json({
+            user: session.user,
+            tenant: session.tenantId ? {
+                tenantId: session.tenantId,
+                tenantKey: session.tenantKey,
+                tenantType: session.tenantType,
+                tenantName: session.tenantName,
+                accountType: session.accountType,
+                workspaceId: session.workspaceId,
+            } : null,
+        });
     }),
 );
 
@@ -795,6 +1326,7 @@ publicRouter.get(
 publicRouter.post(
     '/public/auth/logout',
     asyncHandler(async (req, res) => {
+        const visitorToken = getTenantVisitorToken(req);
         const authHeader = req.header('authorization');
         if (authHeader?.startsWith('Bearer ')) {
             const token = authHeader.slice(7).trim();
@@ -803,19 +1335,22 @@ publicRouter.post(
             }
         }
 
+        if (visitorToken) {
+            await revokeTenantVisitorSession({ sessionToken: visitorToken });
+            res.setHeader(tenantVisitorTokenHeader, '');
+            res.setHeader(tenantVisitorExpiresAtHeader, '');
+        }
+
         res.status(200).json({ ok: true });
     }),
 );
 
 /* ── POST /public/boards/:boardSlug/ideas/:ideaId/subscribe ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas/:ideaId/subscribe',
+    [...publicBoardRoutePatterns.subscribe],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -828,20 +1363,29 @@ publicRouter.post(
         }
 
         const ideaId = String(req.params.ideaId);
-        const result = await subscribeToIdea({ ideaId, userId: access.portalUser.id });
+        const actorContext = await resolveBoardActorContext({
+            req,
+            res,
+            board,
+            portalSession: access.portalUser,
+            visitorSession: access.visitorSession,
+        });
+        const result = await subscribeToIdea({
+            ideaId,
+            userId: access.portalUser.user.id,
+            tenantId: board.tenantId,
+            tenantActorId: actorContext.tenantActorId,
+        });
         res.status(200).json(result);
     }),
 );
 
 /* ── DELETE /public/boards/:boardSlug/ideas/:ideaId/subscribe ── */
 publicRouter.delete(
-    '/public/boards/:boardSlug/ideas/:ideaId/subscribe',
+    [...publicBoardRoutePatterns.subscribe],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -854,20 +1398,17 @@ publicRouter.delete(
         }
 
         const ideaId = String(req.params.ideaId);
-        await unsubscribeFromIdea({ ideaId, userId: access.portalUser.id });
+        await unsubscribeFromIdea({ ideaId, userId: access.portalUser.user.id });
         res.status(200).json({ ok: true });
     }),
 );
 
 /* ── POST /public/boards/:boardSlug/ideas/:ideaId/favorite ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas/:ideaId/favorite',
+    [...publicBoardRoutePatterns.favorite],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -880,20 +1421,29 @@ publicRouter.post(
         }
 
         const ideaId = String(req.params.ideaId);
-        const result = await favoriteIdea({ ideaId, userId: access.portalUser.id });
+        const actorContext = await resolveBoardActorContext({
+            req,
+            res,
+            board,
+            portalSession: access.portalUser,
+            visitorSession: access.visitorSession,
+        });
+        const result = await favoriteIdea({
+            ideaId,
+            userId: access.portalUser.user.id,
+            tenantId: board.tenantId,
+            tenantActorId: actorContext.tenantActorId,
+        });
         res.status(200).json(result);
     }),
 );
 
 /* ── DELETE /public/boards/:boardSlug/ideas/:ideaId/favorite ── */
 publicRouter.delete(
-    '/public/boards/:boardSlug/ideas/:ideaId/favorite',
+    [...publicBoardRoutePatterns.favorite],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -906,7 +1456,7 @@ publicRouter.delete(
         }
 
         const ideaId = String(req.params.ideaId);
-        await unfavoriteIdea({ ideaId, userId: access.portalUser.id });
+        await unfavoriteIdea({ ideaId, userId: access.portalUser.user.id });
         res.status(200).json({ ok: true });
     }),
 );
@@ -915,12 +1465,12 @@ publicRouter.delete(
 publicRouter.get(
     '/public/me/profile',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
+        const portalSession = await getPortalSession(req);
+        if (!portalSession) {
             res.status(401).json({ error: 'not_authenticated' });
             return;
         }
-        res.status(200).json({ user: portalUser });
+        res.status(200).json({ user: portalSession.user, tenant: portalSession.tenantKey });
     }),
 );
 
@@ -928,8 +1478,8 @@ publicRouter.get(
 publicRouter.patch(
     '/public/me/profile',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
+        const portalSession = await getPortalSession(req);
+        if (!portalSession) {
             res.status(401).json({ error: 'not_authenticated' });
             return;
         }
@@ -941,7 +1491,7 @@ publicRouter.patch(
         }
 
         const updated = await updatePortalUserProfile({
-            userId: portalUser.id,
+            userId: portalSession.user.id,
             displayName: parsed.data.displayName,
             avatarUrl: parsed.data.avatarUrl,
         });
@@ -954,13 +1504,16 @@ publicRouter.patch(
 publicRouter.get(
     '/public/me/subscriptions',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
+        const portalSession = await getPortalSession(req);
+        if (!portalSession) {
             res.status(401).json({ error: 'not_authenticated' });
             return;
         }
 
-        const ideaIds = await listUserSubscriptions({ userId: portalUser.id });
+        const ideaIds = await listUserSubscriptions({
+            userId: portalSession.user.id,
+            tenantId: portalSession.tenantId,
+        });
         res.status(200).json({ ideaIds });
     }),
 );
@@ -969,13 +1522,16 @@ publicRouter.get(
 publicRouter.get(
     '/public/me/favorites',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
+        const portalSession = await getPortalSession(req);
+        if (!portalSession) {
             res.status(401).json({ error: 'not_authenticated' });
             return;
         }
 
-        const ideaIds = await listUserFavorites({ userId: portalUser.id });
+        const ideaIds = await listUserFavorites({
+            userId: portalSession.user.id,
+            tenantId: portalSession.tenantId,
+        });
         res.status(200).json({ ideaIds });
     }),
 );
@@ -984,13 +1540,16 @@ publicRouter.get(
 publicRouter.get(
     '/public/me/ideas',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
+        const portalSession = await getPortalSession(req);
+        if (!portalSession) {
             res.status(401).json({ error: 'not_authenticated' });
             return;
         }
 
-        const items = await listUserIdeas({ userId: portalUser.id });
+        const items = await listUserIdeas({
+            userId: portalSession.user.id,
+            tenantId: portalSession.tenantId,
+        });
         res.status(200).json({ items });
     }),
 );
@@ -999,26 +1558,26 @@ publicRouter.get(
 publicRouter.get(
     '/public/me/votes',
     asyncHandler(async (req, res) => {
-        const portalUser = await getPortalUser(req);
-        if (!portalUser) {
+        const portalSession = await getPortalSession(req);
+        if (!portalSession) {
             res.status(401).json({ error: 'not_authenticated' });
             return;
         }
 
-        const items = await listUserVotedIdeas({ userId: portalUser.id });
+        const items = await listUserVotedIdeas({
+            userId: portalSession.user.id,
+            tenantId: portalSession.tenantId,
+        });
         res.status(200).json({ items });
     }),
 );
 
 /* ── GET /public/boards/:boardSlug/changelog ── */
 publicRouter.get(
-    '/public/boards/:boardSlug/changelog',
+    [...publicBoardRoutePatterns.changelog],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -1043,13 +1602,10 @@ publicRouter.get(
 
 /* ── POST /public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/upvote ── */
 publicRouter.post(
-    '/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/upvote',
+    [...publicBoardRoutePatterns.commentUpvote],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -1062,20 +1618,29 @@ publicRouter.post(
         }
 
         const commentId = String(req.params.commentId);
-        const result = await upvoteComment({ commentId, userId: access.portalUser.id });
+        const actorContext = await resolveBoardActorContext({
+            req,
+            res,
+            board,
+            portalSession: access.portalUser,
+            visitorSession: access.visitorSession,
+        });
+        const result = await upvoteComment({
+            commentId,
+            userId: access.portalUser.user.id,
+            tenantId: board.tenantId,
+            tenantActorId: actorContext.tenantActorId,
+        });
         res.status(200).json(result);
     })
 );
 
 /* ── DELETE /public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/upvote ── */
 publicRouter.delete(
-    '/public/boards/:boardSlug/ideas/:ideaId/comments/:commentId/upvote',
+    [...publicBoardRoutePatterns.commentUpvote],
     asyncHandler(async (req, res) => {
-        const slug = String(req.params.boardSlug);
-        const board = await findBoardBySlug({ slug, onlyPublic: false });
-
+        const board = await resolveBoardFromRequest(req, res);
         if (!board) {
-            res.status(404).json({ error: 'board_not_found' });
             return;
         }
 
@@ -1088,7 +1653,7 @@ publicRouter.delete(
         }
 
         const commentId = String(req.params.commentId);
-        const result = await removeCommentUpvote({ commentId, userId: access.portalUser.id });
+        const result = await removeCommentUpvote({ commentId, userId: access.portalUser.user.id });
         res.status(200).json(result);
     })
 );
@@ -1200,7 +1765,22 @@ publicRouter.get(
             record = { user: newUser, passwordHash: null };
         }
 
-        const { token } = await createPortalSession({ userId: record.user.id });
+        const personalTenant = await ensurePersonalTenantForPortalUser({
+            portalUser: record.user,
+            displayName,
+        });
+        await ensurePortalTenantProfile({
+            tenantId: personalTenant.id,
+            portalUserId: record.user.id,
+            accountType: 'personal_owner',
+            homeDomain: email.split('@')[1] ?? null,
+        });
+        const workspace = await findDefaultWorkspaceForTenant(personalTenant.id);
+        const { token } = await createPortalSession({
+            userId: record.user.id,
+            tenantId: personalTenant.id,
+            workspaceId: workspace?.id ?? null,
+        });
 
         // Redirect back to portal with token.
         const portalUrl = process.env.VITE_APP_URL || 'http://localhost:3333/portal';

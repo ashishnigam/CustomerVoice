@@ -516,6 +516,547 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_sso_connections_domain ON sso_connections (domain);
     `,
   },
+  {
+    id: '014_tenant_domain_foundation',
+    sql: `
+      ALTER TABLE tenants
+        ADD COLUMN IF NOT EXISTS tenant_key TEXT DEFAULT CONCAT('tnt_', SUBSTRING(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 24)),
+        ADD COLUMN IF NOT EXISTS tenant_type TEXT NOT NULL DEFAULT 'enterprise' CHECK (tenant_type IN ('enterprise', 'personal')),
+        ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending_setup', 'suspended')),
+        ADD COLUMN IF NOT EXISTS primary_domain TEXT,
+        ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+      UPDATE tenants
+      SET
+        tenant_key = COALESCE(tenant_key, CONCAT('tnt_', SUBSTRING(md5(id) FROM 1 FOR 24))),
+        tenant_type = COALESCE(tenant_type, 'enterprise'),
+        status = COALESCE(status, 'active'),
+        features = COALESCE(features, '{}'::jsonb),
+        updated_at = COALESCE(updated_at, NOW())
+      WHERE tenant_key IS NULL
+         OR tenant_type IS NULL
+         OR status IS NULL
+         OR features IS NULL
+         OR updated_at IS NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_tenant_key
+        ON tenants (tenant_key);
+
+      CREATE TABLE IF NOT EXISTS tenant_domains (
+        id                  TEXT PRIMARY KEY,
+        tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        domain              TEXT NOT NULL,
+        is_primary          BOOLEAN NOT NULL DEFAULT FALSE,
+        domain_kind         TEXT NOT NULL CHECK (domain_kind IN ('enterprise', 'public_email_provider', 'alias')),
+        verification_status TEXT NOT NULL DEFAULT 'pending' CHECK (verification_status IN ('pending', 'verified', 'failed', 'blocked')),
+        verification_method TEXT NOT NULL DEFAULT 'system' CHECK (verification_method IN ('dns_txt', 'email', 'manual', 'system')),
+        verification_token  TEXT,
+        verified_at         TIMESTAMPTZ,
+        active              BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_domains_domain
+        ON tenant_domains (LOWER(domain));
+
+      CREATE INDEX IF NOT EXISTS idx_tenant_domains_tenant_id
+        ON tenant_domains (tenant_id, active, verification_status);
+    `,
+  },
+  {
+    id: '015_tenant_scope_backfill_columns',
+    sql: `
+      ALTER TABLE boards
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS public_board_key TEXT DEFAULT CONCAT('brd_', SUBSTRING(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 18));
+
+      UPDATE boards b
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE b.workspace_id = w.id
+        AND b.tenant_id IS NULL;
+
+      UPDATE boards
+      SET public_board_key = COALESCE(NULLIF(public_board_key, ''), slug)
+      WHERE public_board_key IS NULL OR public_board_key = '';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_tenant_public_board_key
+        ON boards (tenant_id, public_board_key);
+
+      CREATE INDEX IF NOT EXISTS idx_boards_tenant_slug
+        ON boards (tenant_id, slug);
+
+      ALTER TABLE sso_connections
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE;
+
+      UPDATE sso_connections sc
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE sc.workspace_id = w.id
+        AND sc.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_sso_connections_tenant_domain
+        ON sso_connections (tenant_id, domain);
+    `,
+  },
+  {
+    id: '016_public_identity_multitenant',
+    sql: `
+      CREATE TABLE IF NOT EXISTS portal_tenant_profiles (
+        id            TEXT PRIMARY KEY,
+        tenant_id     TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        portal_user_id TEXT NOT NULL REFERENCES portal_users(id) ON DELETE CASCADE,
+        account_type  TEXT NOT NULL CHECK (account_type IN ('personal_owner', 'enterprise_member', 'guest')),
+        home_domain   TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (tenant_id, portal_user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS tenant_visitors (
+        id            TEXT PRIMARY KEY,
+        tenant_id     TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        visitor_key   TEXT NOT NULL,
+        session_token TEXT NOT NULL,
+        expires_at    TIMESTAMPTZ NOT NULL,
+        revoked_at    TIMESTAMPTZ,
+        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (tenant_id, visitor_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS tenant_actors (
+        id                 TEXT PRIMARY KEY,
+        tenant_id          TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        actor_type         TEXT NOT NULL CHECK (actor_type IN ('internal_user', 'portal_user', 'visitor', 'system')),
+        internal_user_id   TEXT REFERENCES users(id) ON DELETE CASCADE,
+        portal_user_id     TEXT REFERENCES portal_users(id) ON DELETE CASCADE,
+        tenant_visitor_id  TEXT REFERENCES tenant_visitors(id) ON DELETE CASCADE,
+        display_name       TEXT,
+        email              TEXT,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_actors_internal_user
+        ON tenant_actors (tenant_id, internal_user_id)
+        WHERE internal_user_id IS NOT NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_actors_portal_user
+        ON tenant_actors (tenant_id, portal_user_id)
+        WHERE portal_user_id IS NOT NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_actors_visitor
+        ON tenant_actors (tenant_id, tenant_visitor_id)
+        WHERE tenant_visitor_id IS NOT NULL;
+
+      ALTER TABLE portal_sessions
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;
+
+      CREATE INDEX IF NOT EXISTS idx_portal_sessions_tenant_token
+        ON portal_sessions (tenant_id, token);
+
+      ALTER TABLE ideas
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS tenant_actor_id TEXT REFERENCES tenant_actors(id) ON DELETE SET NULL;
+
+      UPDATE ideas i
+      SET tenant_id = b.tenant_id
+      FROM boards b
+      WHERE i.board_id = b.id
+        AND i.tenant_id IS NULL;
+
+      ALTER TABLE idea_comments
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS tenant_actor_id TEXT REFERENCES tenant_actors(id) ON DELETE SET NULL;
+
+      UPDATE idea_comments c
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE c.idea_id = i.id
+        AND c.tenant_id IS NULL;
+
+      ALTER TABLE idea_votes
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS tenant_actor_id TEXT REFERENCES tenant_actors(id) ON DELETE SET NULL;
+
+      UPDATE idea_votes v
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE v.idea_id = i.id
+        AND v.tenant_id IS NULL;
+
+      ALTER TABLE idea_subscriptions
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS tenant_actor_id TEXT REFERENCES tenant_actors(id) ON DELETE SET NULL;
+
+      UPDATE idea_subscriptions s
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE s.idea_id = i.id
+        AND s.tenant_id IS NULL;
+
+      ALTER TABLE idea_favorites
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS tenant_actor_id TEXT REFERENCES tenant_actors(id) ON DELETE SET NULL;
+
+      UPDATE idea_favorites f
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE f.idea_id = i.id
+        AND f.tenant_id IS NULL;
+
+      ALTER TABLE comment_upvotes
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS tenant_actor_id TEXT REFERENCES tenant_actors(id) ON DELETE SET NULL;
+
+      UPDATE comment_upvotes cu
+      SET tenant_id = ic.tenant_id
+      FROM idea_comments ic
+      WHERE cu.comment_id = ic.id
+        AND cu.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_ideas_tenant_id ON ideas (tenant_id, board_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_idea_comments_tenant_id ON idea_comments (tenant_id, idea_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_idea_votes_tenant_id ON idea_votes (tenant_id, idea_id);
+      CREATE INDEX IF NOT EXISTS idx_idea_subscriptions_tenant_id ON idea_subscriptions (tenant_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_idea_favorites_tenant_id ON idea_favorites (tenant_id, user_id);
+    `,
+  },
+  {
+    id: '017_internal_tenant_membership_hardening',
+    sql: `
+      CREATE TABLE IF NOT EXISTS tenant_memberships (
+        tenant_id   TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role        TEXT NOT NULL CHECK (role IN ('tenant_admin', 'tenant_member', 'tenant_guest')),
+        status      TEXT NOT NULL DEFAULT 'active',
+        invited_by  TEXT REFERENCES users(id),
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (tenant_id, user_id)
+      );
+
+      INSERT INTO tenant_memberships (tenant_id, user_id, role, status, invited_by)
+      SELECT DISTINCT
+        w.tenant_id,
+        wm.user_id,
+        CASE
+          WHEN wm.role IN ('tenant_admin', 'workspace_admin') THEN 'tenant_admin'
+          ELSE 'tenant_member'
+        END,
+        CASE WHEN wm.active THEN 'active' ELSE 'inactive' END,
+        wm.invited_by
+      FROM workspace_memberships wm
+      JOIN workspaces w ON w.id = wm.workspace_id
+      ON CONFLICT (tenant_id, user_id) DO NOTHING;
+    `,
+  },
+  {
+    id: '018_tenant_public_routing_support',
+    sql: `
+      ALTER TABLE boards
+        ALTER COLUMN tenant_id SET NOT NULL,
+        ALTER COLUMN public_board_key SET NOT NULL;
+
+      ALTER TABLE sso_connections
+        ALTER COLUMN tenant_id SET NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_tenants_primary_domain
+        ON tenants (LOWER(primary_domain));
+    `,
+  },
+  {
+    id: '019_tenant_actor_upsert_constraints',
+    sql: `
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'uq_tenant_actors_internal_user'
+        ) THEN
+          ALTER TABLE tenant_actors
+            ADD CONSTRAINT uq_tenant_actors_internal_user UNIQUE (tenant_id, internal_user_id);
+        END IF;
+      END $$;
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'uq_tenant_actors_portal_user'
+        ) THEN
+          ALTER TABLE tenant_actors
+            ADD CONSTRAINT uq_tenant_actors_portal_user UNIQUE (tenant_id, portal_user_id);
+        END IF;
+      END $$;
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'uq_tenant_actors_visitor'
+        ) THEN
+          ALTER TABLE tenant_actors
+            ADD CONSTRAINT uq_tenant_actors_visitor UNIQUE (tenant_id, tenant_visitor_id);
+        END IF;
+      END $$;
+    `,
+  },
+  {
+    id: '020_auth_notification_nullable_context',
+    sql: `
+      ALTER TABLE notification_jobs
+        ALTER COLUMN workspace_id DROP NOT NULL,
+        ALTER COLUMN board_id DROP NOT NULL,
+        ALTER COLUMN idea_id DROP NOT NULL;
+
+      ALTER TABLE notification_job_recipients
+        ALTER COLUMN workspace_id DROP NOT NULL;
+    `,
+  },
+  {
+    id: '021_tenant_scope_operability_hardening',
+    sql: `
+      ALTER TABLE workspace_memberships
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE;
+
+      UPDATE workspace_memberships wm
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE wm.workspace_id = w.id
+        AND wm.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_memberships_tenant_id
+        ON workspace_memberships (tenant_id, workspace_id, active);
+
+      ALTER TABLE workspace_role_permissions
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE;
+
+      UPDATE workspace_role_permissions wrp
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE wrp.workspace_id = w.id
+        AND wrp.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_role_permissions_tenant_id
+        ON workspace_role_permissions (tenant_id, workspace_id, role);
+
+      ALTER TABLE audit_events
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE;
+
+      UPDATE audit_events ae
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE ae.workspace_id = w.id
+        AND ae.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_created_at
+        ON audit_events (tenant_id, created_at DESC);
+
+      ALTER TABLE webhooks
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE;
+
+      UPDATE webhooks wh
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE wh.workspace_id = w.id
+        AND wh.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_webhooks_tenant_active
+        ON webhooks (tenant_id, active, created_at DESC);
+
+      ALTER TABLE notification_jobs
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE;
+
+      UPDATE notification_jobs nj
+      SET tenant_id = b.tenant_id
+      FROM boards b
+      WHERE nj.board_id = b.id
+        AND nj.tenant_id IS NULL;
+
+      UPDATE notification_jobs nj
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE nj.workspace_id = w.id
+        AND nj.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_notification_jobs_tenant_status
+        ON notification_jobs (tenant_id, status, created_at ASC);
+
+      ALTER TABLE notification_job_recipients
+        ADD COLUMN IF NOT EXISTS tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE;
+
+      UPDATE notification_job_recipients nr
+      SET tenant_id = nj.tenant_id
+      FROM notification_jobs nj
+      WHERE nr.job_id = nj.id
+        AND nr.tenant_id IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_notification_recipients_tenant_status
+        ON notification_job_recipients (tenant_id, status, created_at ASC);
+
+      CREATE TABLE IF NOT EXISTS global_operator_assignments (
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        global_role TEXT NOT NULL CHECK (global_role IN ('support_admin', 'global_admin')),
+        active      BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, global_role)
+      );
+
+      CREATE TABLE IF NOT EXISTS tenant_impersonation_sessions (
+        id               TEXT PRIMARY KEY,
+        operator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        operator_email   TEXT NOT NULL,
+        tenant_id        TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        assumed_role     TEXT NOT NULL CHECK (assumed_role IN (${roles})),
+        session_token    TEXT NOT NULL UNIQUE,
+        expires_at       TIMESTAMPTZ NOT NULL,
+        revoked_at       TIMESTAMPTZ,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_tenant_impersonation_active
+        ON tenant_impersonation_sessions (tenant_id, revoked_at, expires_at);
+    `,
+  },
+  {
+    id: '022_tenant_backfill_repair',
+    sql: `
+      UPDATE workspace_memberships wm
+      SET tenant_id = w.tenant_id
+      FROM workspaces w
+      WHERE wm.workspace_id = w.id
+        AND wm.tenant_id IS NULL;
+
+      UPDATE ideas i
+      SET tenant_id = b.tenant_id
+      FROM boards b
+      WHERE i.board_id = b.id
+        AND i.tenant_id IS NULL;
+
+      UPDATE idea_comments c
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE c.idea_id = i.id
+        AND c.tenant_id IS NULL;
+
+      UPDATE idea_votes v
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE v.idea_id = i.id
+        AND v.tenant_id IS NULL;
+
+      UPDATE idea_subscriptions s
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE s.idea_id = i.id
+        AND s.tenant_id IS NULL;
+
+      UPDATE idea_favorites f
+      SET tenant_id = i.tenant_id
+      FROM ideas i
+      WHERE f.idea_id = i.id
+        AND f.tenant_id IS NULL;
+
+      UPDATE comment_upvotes cu
+      SET tenant_id = ic.tenant_id
+      FROM idea_comments ic
+      WHERE cu.comment_id = ic.id
+        AND cu.tenant_id IS NULL;
+
+      INSERT INTO tenant_actors (id, tenant_id, actor_type, internal_user_id, display_name, email)
+      SELECT DISTINCT
+        CONCAT('actor_backfill_', scope.tenant_id, '_', scope.user_id) AS id,
+        scope.tenant_id,
+        'internal_user',
+        scope.user_id,
+        u.display_name,
+        u.email
+      FROM (
+        SELECT tenant_id, created_by AS user_id
+        FROM ideas
+        WHERE tenant_id IS NOT NULL
+          AND created_by IS NOT NULL
+        UNION
+        SELECT tenant_id, user_id
+        FROM idea_comments
+        WHERE tenant_id IS NOT NULL
+          AND user_id IS NOT NULL
+        UNION
+        SELECT tenant_id, user_id
+        FROM idea_votes
+        WHERE tenant_id IS NOT NULL
+          AND user_id IS NOT NULL
+        UNION
+        SELECT tenant_id, user_id
+        FROM idea_subscriptions
+        WHERE tenant_id IS NOT NULL
+          AND user_id IS NOT NULL
+        UNION
+        SELECT tenant_id, user_id
+        FROM idea_favorites
+        WHERE tenant_id IS NOT NULL
+          AND user_id IS NOT NULL
+        UNION
+        SELECT tenant_id, user_id
+        FROM comment_upvotes
+        WHERE tenant_id IS NOT NULL
+          AND user_id IS NOT NULL
+      ) AS scope
+      JOIN users u ON u.id = scope.user_id
+      ON CONFLICT (tenant_id, internal_user_id) DO UPDATE
+      SET display_name = COALESCE(EXCLUDED.display_name, tenant_actors.display_name),
+          email = COALESCE(EXCLUDED.email, tenant_actors.email);
+
+      UPDATE ideas i
+      SET tenant_actor_id = ta.id
+      FROM tenant_actors ta
+      WHERE i.tenant_id = ta.tenant_id
+        AND ta.internal_user_id = i.created_by
+        AND i.tenant_actor_id IS NULL;
+
+      UPDATE idea_comments c
+      SET tenant_actor_id = ta.id
+      FROM tenant_actors ta
+      WHERE c.tenant_id = ta.tenant_id
+        AND ta.internal_user_id = c.user_id
+        AND c.tenant_actor_id IS NULL;
+
+      UPDATE idea_votes v
+      SET tenant_actor_id = ta.id
+      FROM tenant_actors ta
+      WHERE v.tenant_id = ta.tenant_id
+        AND ta.internal_user_id = v.user_id
+        AND v.tenant_actor_id IS NULL;
+
+      UPDATE idea_subscriptions s
+      SET tenant_actor_id = ta.id
+      FROM tenant_actors ta
+      WHERE s.tenant_id = ta.tenant_id
+        AND ta.internal_user_id = s.user_id
+        AND s.tenant_actor_id IS NULL;
+
+      UPDATE idea_favorites f
+      SET tenant_actor_id = ta.id
+      FROM tenant_actors ta
+      WHERE f.tenant_id = ta.tenant_id
+        AND ta.internal_user_id = f.user_id
+        AND f.tenant_actor_id IS NULL;
+
+      UPDATE comment_upvotes cu
+      SET tenant_actor_id = ta.id
+      FROM tenant_actors ta
+      WHERE cu.tenant_id = ta.tenant_id
+        AND ta.internal_user_id = cu.user_id
+        AND cu.tenant_actor_id IS NULL;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

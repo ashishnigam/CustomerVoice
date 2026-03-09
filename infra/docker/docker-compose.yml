@@ -10,6 +10,18 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
 
+  analytics-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${ANALYTICS_POSTGRES_PORT:-55433}:5432"
+    volumes:
+      - analytics_pg_data:/var/lib/postgresql/data
+      - ./superset/init-analytics.sql:/docker-entrypoint-initdb.d/01-init-analytics.sql:ro
+
   redis:
     image: redis:7-alpine
     ports:
@@ -81,5 +93,29 @@ services:
     depends_on:
       - api
 
+  superset:
+    build:
+      context: ./superset
+    image: customervoice/superset:6.0.0-local
+    environment:
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_DATABASE_URL: postgresql+psycopg2://superset:superset@analytics-postgres:5432/superset_meta
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-change-me}
+      SUPERSET_PORT: ${SUPERSET_PORT:-8088}
+      SUPERSET_ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME:-admin}
+      SUPERSET_ADMIN_FIRSTNAME: ${SUPERSET_ADMIN_FIRSTNAME:-CustomerVoice}
+      SUPERSET_ADMIN_LASTNAME: ${SUPERSET_ADMIN_LASTNAME:-Admin}
+      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@customervoice.local}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-admin}
+    ports:
+      - "${SUPERSET_PORT:-8088}:8088"
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/init-superset.sh:/app/init-superset.sh:ro
+    command: ["/bin/sh", "/app/init-superset.sh"]
+    depends_on:
+      - analytics-postgres
+
 volumes:
   pg_data:
+  analytics_pg_data:

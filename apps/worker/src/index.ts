@@ -1,14 +1,20 @@
-import { loadLocalEnv } from './load-env.js';
 import nodemailer from 'nodemailer';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool, type PoolClient } from 'pg';
-
-loadLocalEnv();
+import {
+  getActiveTraceMetadata,
+  recordActiveSpanException,
+  runWithSpan,
+  setActiveSpanAttributes,
+  shutdownObservability,
+} from './observability.js';
 
 interface NotificationJob {
   id: string;
-  workspace_id: string;
-  board_id: string;
-  idea_id: string;
+  tenant_id: string | null;
+  workspace_id: string | null;
+  board_id: string | null;
+  idea_id: string | null;
   event_type: string;
   template_id: string;
   payload: Record<string, unknown>;
@@ -28,6 +34,19 @@ interface Webhook {
   secret: string;
 }
 
+interface WorkerContext {
+  source: 'worker';
+  tenantId: string | null;
+  workspaceId: string | null;
+  jobId: string | null;
+  eventType: string | null;
+}
+
+interface FixedWindowBucket {
+  count: number;
+  resetAt: number;
+}
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required for worker notifications');
@@ -39,11 +58,15 @@ const smtpPort = Number(process.env.SMTP_PORT ?? 1025);
 const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
 const fromEmail = process.env.WORKER_FROM_EMAIL ?? 'notifications@customervoice.local';
+const webhookDispatchLimit = Number(process.env.WORKER_WEBHOOK_DISPATCH_LIMIT ?? 120);
 
 const pool = new Pool({
   connectionString: databaseUrl,
   max: Number(process.env.DB_POOL_MAX ?? 5),
 });
+
+const workerContextStorage = new AsyncLocalStorage<WorkerContext>();
+const fixedWindowBuckets = new Map<string, FixedWindowBucket>();
 
 const transporter = nodemailer.createTransport({
   host: smtpHost,
@@ -51,6 +74,84 @@ const transporter = nodemailer.createTransport({
   secure: false,
   auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined,
 });
+
+function withWorkerContext<T>(value: WorkerContext, fn: () => Promise<T>): Promise<T> {
+  return workerContextStorage.run(value, fn);
+}
+
+function getWorkerContext(): WorkerContext | null {
+  return workerContextStorage.getStore() ?? null;
+}
+
+function buildLogPayload(level: 'info' | 'warn' | 'error', message: string, fields: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    level,
+    message,
+    ...getWorkerContext(),
+    ...getActiveTraceMetadata(),
+    ...fields,
+  });
+}
+
+function logInfo(message: string, fields: Record<string, unknown> = {}): void {
+  console.log(buildLogPayload('info', message, fields));
+}
+
+function logWarn(message: string, fields: Record<string, unknown> = {}): void {
+  console.warn(buildLogPayload('warn', message, fields));
+}
+
+function logError(message: string, fields: Record<string, unknown> = {}): void {
+  console.error(buildLogPayload('error', message, fields));
+}
+
+function workerContextSpanAttributes(value: WorkerContext | null): Record<string, string | number | boolean> {
+  if (!value) {
+    return { 'cv.source': 'worker' };
+  }
+
+  const attributes: Record<string, string | number | boolean> = {
+    'cv.source': value.source,
+  };
+
+  if (value.tenantId) {
+    attributes['cv.tenant_id'] = value.tenantId;
+  }
+  if (value.workspaceId) {
+    attributes['cv.workspace_id'] = value.workspaceId;
+  }
+  if (value.jobId) {
+    attributes['cv.job_id'] = value.jobId;
+  }
+  if (value.eventType) {
+    attributes['cv.event_type'] = value.eventType;
+  }
+
+  return attributes;
+}
+
+function consumeWorkerRateLimit(bucket: string, limit: number, windowMs: number): { allowed: boolean; retryAfterMs: number } {
+  const now = Date.now();
+  const current = fixedWindowBuckets.get(bucket);
+  if (!current || current.resetAt <= now) {
+    fixedWindowBuckets.set(bucket, {
+      count: 1,
+      resetAt: now + windowMs,
+    });
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
+  if (current.count >= limit) {
+    return {
+      allowed: false,
+      retryAfterMs: Math.max(0, current.resetAt - now),
+    };
+  }
+
+  current.count += 1;
+  fixedWindowBuckets.set(bucket, current);
+  return { allowed: true, retryAfterMs: 0 };
+}
 
 async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
@@ -80,6 +181,7 @@ async function claimNotificationJob(): Promise<
       `
         SELECT
           id,
+          tenant_id,
           workspace_id,
           board_id,
           idea_id,
@@ -244,46 +346,77 @@ async function finalizeJob(params: {
 }
 
 async function dispatchWebhooks(job: NotificationJob): Promise<void> {
-  try {
-    const hw = await pool.query<Webhook>(
-      `
-        SELECT id, url, secret
-        FROM webhooks
-        WHERE workspace_id = $1
-          AND active = true
-          AND $2 = ANY(events)
-      `,
-      [job.workspace_id, job.event_type],
-    );
-
-    if (hw.rows.length === 0) return;
-
-    const promises = hw.rows.map(async (wh) => {
+  await runWithSpan(
+    'worker.webhook_dispatch',
+    {
+      ...workerContextSpanAttributes(getWorkerContext()),
+      'cv.board_id': job.board_id ?? '',
+    },
+    async () => {
       try {
-        const res = await fetch(wh.url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-cv-webhook-secret': wh.secret,
-          },
-          body: JSON.stringify({
-            event: job.event_type,
-            payload: job.payload,
-            timestamp: new Date().toISOString(),
-          }),
-        });
-        if (!res.ok) {
-          console.warn(`[webhook] dispatch failed url=${wh.url} status=${res.status}`);
+        const tenantId = job.tenant_id;
+        if (tenantId) {
+          const rateLimit = consumeWorkerRateLimit(`webhooks:${tenantId}`, webhookDispatchLimit, 60_000);
+          if (!rateLimit.allowed) {
+            logWarn('webhook_dispatch_throttled', {
+              tenantId,
+              retryAfterMs: rateLimit.retryAfterMs,
+              eventType: job.event_type,
+            });
+            setActiveSpanAttributes({
+              'cv.webhook_throttled': true,
+              'cv.webhook_retry_after_ms': rateLimit.retryAfterMs,
+            });
+            return;
+          }
         }
-      } catch (err: any) {
-        console.error(`[webhook] dispatch error url=${wh.url}`, err.message);
-      }
-    });
 
-    await Promise.allSettled(promises);
-  } catch (err: any) {
-    console.error(`[webhook] fetch webhooks failed`, err.message);
-  }
+        const hw = await pool.query<Webhook>(
+          `
+            SELECT id, url, secret
+            FROM webhooks
+            WHERE tenant_id = $1
+              AND ($2::text IS NULL OR workspace_id = $2)
+              AND active = true
+              AND $3 = ANY(events)
+          `,
+          [job.tenant_id, job.workspace_id, job.event_type],
+        );
+
+        if (hw.rows.length === 0) return;
+
+        const promises = hw.rows.map(async (wh) => {
+          try {
+            const res = await fetch(wh.url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-cv-webhook-secret': wh.secret,
+              },
+              body: JSON.stringify({
+                event: job.event_type,
+                payload: job.payload,
+                timestamp: new Date().toISOString(),
+              }),
+            });
+            if (!res.ok) {
+              logWarn('webhook_dispatch_failed', { url: wh.url, status: res.status });
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'webhook_dispatch_failed';
+            recordActiveSpanException(error, { 'cv.webhook_url': wh.url });
+            logError('webhook_dispatch_error', { url: wh.url, error: message });
+          }
+        });
+
+        await Promise.allSettled(promises);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'webhook_fetch_failed';
+        recordActiveSpanException(error);
+        logError('webhook_fetch_failed', { error: message });
+      }
+    },
+  );
 }
 
 async function processNextJob(): Promise<boolean> {
@@ -293,37 +426,64 @@ async function processNextJob(): Promise<boolean> {
   }
 
   const { job, recipients, attemptCount } = claimed;
-  const content = buildMailContent(job);
+  await withWorkerContext(
+    {
+      source: 'worker',
+      tenantId: job.tenant_id,
+      workspaceId: job.workspace_id,
+      jobId: job.id,
+      eventType: job.event_type,
+    },
+    async () => {
+      await runWithSpan(
+        'worker.notification_job',
+        {
+          ...workerContextSpanAttributes(getWorkerContext()),
+          'cv.board_id': job.board_id ?? '',
+          'cv.idea_id': job.idea_id ?? '',
+          'cv.attempt_count': attemptCount,
+          'cv.recipient_count': recipients.length,
+        },
+        async () => {
+          logInfo('notification_job_claimed', {
+            attemptCount,
+            recipientCount: recipients.length,
+          });
 
-  let lastError: string | undefined;
+          const content = buildMailContent(job);
+          let lastError: string | undefined;
 
-  for (const recipient of recipients) {
-    try {
-      await transporter.sendMail({
-        from: fromEmail,
-        to: recipient.email,
-        subject: content.subject,
-        text: content.text,
-      });
-      await markRecipientSent(recipient.id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'smtp_send_failed';
-      lastError = message;
-      await markRecipientFailed(recipient.id, message);
-    }
-  }
+          for (const recipient of recipients) {
+            try {
+              await transporter.sendMail({
+                from: fromEmail,
+                to: recipient.email,
+                subject: content.subject,
+                text: content.text,
+              });
+              await markRecipientSent(recipient.id);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'smtp_send_failed';
+              lastError = message;
+              recordActiveSpanException(error, { 'cv.recipient_email': recipient.email });
+              await markRecipientFailed(recipient.id, message);
+            }
+          }
 
-  // Dispatch Webhooks
-  if (attemptCount === 1) {
-    await dispatchWebhooks(job);
-  }
+          if (attemptCount === 1) {
+            await dispatchWebhooks(job);
+          }
 
-  await finalizeJob({
-    jobId: job.id,
-    attemptCount,
-    maxAttempts: job.max_attempts,
-    lastError,
-  });
+          await finalizeJob({
+            jobId: job.id,
+            attemptCount,
+            maxAttempts: job.max_attempts,
+            lastError,
+          });
+        },
+      );
+    },
+  );
 
   return true;
 }
@@ -338,10 +498,13 @@ async function tick(): Promise<void> {
   try {
     const processed = await processNextJob();
     if (processed) {
-      console.log(`[worker] processed notification job at ${new Date().toISOString()}`);
+      logInfo('notification_job_processed', { processedAt: new Date().toISOString() });
     }
   } catch (error) {
-    console.error('[worker] notification processing failed', error);
+    recordActiveSpanException(error);
+    logError('notification_processing_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -350,13 +513,13 @@ async function shutdown(signal: string): Promise<void> {
     return;
   }
   shuttingDown = true;
-  console.log(`[worker] shutdown signal=${signal}`);
+  logInfo('worker_shutdown', { signal });
+  await shutdownObservability();
   await pool.end();
   process.exit(0);
 }
 
-console.log('[worker] starting notification dispatcher');
-console.log(`[worker] smtp=${smtpHost}:${smtpPort} pollIntervalMs=${pollIntervalMs}`);
+logInfo('worker_start', { smtp: `${smtpHost}:${smtpPort}`, pollIntervalMs });
 
 const interval = setInterval(() => {
   void tick();

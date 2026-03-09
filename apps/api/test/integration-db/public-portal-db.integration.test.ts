@@ -20,6 +20,15 @@ function headers(params: { userId: string; role: string; workspaceId?: string })
         'x-user-id': params.userId,
         'x-role': params.role,
         'x-workspace-id': params.workspaceId ?? WORKSPACE_ID,
+        'x-user-email': 'admin@customervoice.test',
+    };
+}
+
+function operatorHeaders(params: { userId: string; globalRole?: 'support_admin' | 'global_admin' }) {
+    return {
+        'x-user-id': params.userId,
+        'x-user-email': 'admin@customervoice.test',
+        'x-global-role': params.globalRole ?? 'support_admin',
     };
 }
 
@@ -30,8 +39,18 @@ async function seedBaseData(): Promise<void> {
 
     await query(
         `
-      INSERT INTO tenants (id, name, slug)
-      VALUES ($1, 'CustomerVoice Test Tenant', 'customer-voice-test')
+      INSERT INTO tenants (id, name, slug, tenant_key, tenant_type, status, primary_domain)
+      VALUES ($1, 'CustomerVoice Test Tenant', 'customer-voice-test', 'tnt_testtenant001', 'enterprise', 'active', 'acme.corp')
+    `,
+        [TENANT_ID],
+    );
+
+    await query(
+        `
+      INSERT INTO tenant_domains (
+        id, tenant_id, domain, is_primary, domain_kind, verification_status, verification_method, verification_token, verified_at, active
+      )
+      VALUES ('tenant-domain-1', $1, 'acme.corp', TRUE, 'enterprise', 'verified', 'system', 'test-verify', NOW(), TRUE)
     `,
         [TENANT_ID],
     );
@@ -54,10 +73,19 @@ async function seedBaseData(): Promise<void> {
 
     await query(
         `
-      INSERT INTO workspace_memberships (workspace_id, user_id, role, active, invited_by)
-      VALUES ($1, $2, 'workspace_admin', TRUE, $2)
+      INSERT INTO workspace_memberships (workspace_id, tenant_id, user_id, role, active, invited_by)
+      VALUES ($1, $2, $3, 'workspace_admin', TRUE, $3)
     `,
-        [WORKSPACE_ID, ADMIN_ID],
+        [WORKSPACE_ID, TENANT_ID, ADMIN_ID],
+    );
+
+    await query(
+        `
+      INSERT INTO global_operator_assignments (user_id, global_role, active)
+      VALUES ($1, 'support_admin', TRUE)
+      ON CONFLICT (user_id, global_role) DO UPDATE SET active = TRUE
+    `,
+        [ADMIN_ID],
     );
 }
 
@@ -119,7 +147,9 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
         expect(registerResponse.status).toBe(201);
         expect(registerResponse.body.token).toBeDefined();
         expect(registerResponse.body.user.email).toBe('customer@test.com');
+        expect(registerResponse.body.tenant?.tenantKey).toBeTruthy();
         const token = registerResponse.body.token;
+        const personalTenantKey = registerResponse.body.tenant.tenantKey as string;
 
         // 2. Fetch Board Settings
         const settingsResponse = await request(app).get(`/api/v1/public/boards/${boardSlug}/settings`);
@@ -210,9 +240,20 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
         expect(resetResponse.status).toBe(200);
 
         // 11. Login with new password
-        const loginResponse = await request(app)
+        const ambiguousLoginResponse = await request(app)
             .post('/api/v1/public/auth/login')
             .send({ email: 'customer@test.com', password: 'NewPassword321!' });
+
+        expect(ambiguousLoginResponse.status).toBe(409);
+        expect(ambiguousLoginResponse.body.error).toBe('tenant_selection_required');
+
+        const loginResponse = await request(app)
+            .post('/api/v1/public/auth/login')
+            .send({
+                email: 'customer@test.com',
+                password: 'NewPassword321!',
+                tenantKey: personalTenantKey,
+            });
 
         expect(loginResponse.status).toBe(200);
         expect(loginResponse.body.token).toBeDefined();
@@ -369,5 +410,144 @@ describe('db-backed integration: public portal flows (Phases 1-3)', () => {
             .set('Authorization', `Bearer ${allowlistedEmailRegisterResponse.body.token}`);
         expect(allowlistedCategoriesResponse.status).toBe(200);
         expect(Array.isArray(allowlistedCategoriesResponse.body.items)).toBe(true);
+    });
+
+    it('resolves enterprise domains and personal fallback through the tenant API', async () => {
+        const enterpriseResponse = await request(app)
+            .post('/api/v1/public/tenant/resolve')
+            .send({ domain: 'acme.corp' });
+
+        expect(enterpriseResponse.status).toBe(200);
+        expect(enterpriseResponse.body.resolution).toBe('enterprise');
+        expect(enterpriseResponse.body.tenant.tenantKey).toBe('tnt_testtenant001');
+
+        const personalResponse = await request(app)
+            .post('/api/v1/public/tenant/resolve')
+            .send({ email: 'someone@gmail.com' });
+
+        expect(personalResponse.status).toBe(200);
+        expect(personalResponse.body.resolution).toBe('personal');
+        expect(personalResponse.body.personalTenantFallback).toBe(true);
+    });
+
+    it('returns tenant context for registered public sessions', async () => {
+        const registerResponse = await request(app)
+            .post('/api/v1/public/auth/register')
+            .send({
+                email: 'member@acme.corp',
+                password: 'Password123!',
+                displayName: 'Acme Member',
+            });
+
+        expect(registerResponse.status).toBe(201);
+        expect(registerResponse.body.tenant.tenantType).toBe('enterprise');
+        expect(registerResponse.body.tenant.accountType).toBe('enterprise_member');
+
+        const meResponse = await request(app)
+            .get('/api/v1/public/auth/me')
+            .set('Authorization', `Bearer ${registerResponse.body.token}`);
+
+        expect(meResponse.status).toBe(200);
+        expect(meResponse.body.tenant.tenantKey).toBe('tnt_testtenant001');
+        expect(meResponse.body.tenant.accountType).toBe('enterprise_member');
+    });
+
+    it('issues renewable tenant visitor sessions and revokes them on logout', async () => {
+        const boardResponse = await request(app).get(`/api/v1/public/boards/${boardSlug}`);
+        expect(boardResponse.status).toBe(200);
+        const firstVisitorToken = boardResponse.headers['x-tenant-visitor-token'] as string | undefined;
+        expect(firstVisitorToken).toBeTruthy();
+
+        const ideasResponse = await request(app)
+            .get(`/api/v1/public/boards/${boardSlug}/ideas`)
+            .set('x-tenant-visitor-token', firstVisitorToken ?? '');
+        expect(ideasResponse.status).toBe(200);
+        expect(ideasResponse.headers['x-tenant-visitor-token']).toBe(firstVisitorToken);
+
+        const logoutResponse = await request(app)
+            .post('/api/v1/public/auth/logout')
+            .set('x-tenant-visitor-token', firstVisitorToken ?? '');
+        expect(logoutResponse.status).toBe(200);
+
+        const renewedBoardResponse = await request(app)
+            .get(`/api/v1/public/boards/${boardSlug}`)
+            .set('x-tenant-visitor-token', firstVisitorToken ?? '');
+        expect(renewedBoardResponse.status).toBe(200);
+        expect(renewedBoardResponse.headers['x-tenant-visitor-token']).toBeTruthy();
+        expect(renewedBoardResponse.headers['x-tenant-visitor-token']).not.toBe(firstVisitorToken);
+    });
+
+    it('supports tenant domain claim proof verification and support-admin impersonation', async () => {
+        const claimResponse = await request(app)
+            .post(`/api/v1/tenants/${TENANT_ID}/domains`)
+            .set(headers({ userId: ADMIN_ID, role: 'tenant_admin' }))
+            .send({
+                domain: 'identity.acme.corp',
+                domainKind: 'alias',
+            });
+
+        expect(claimResponse.status).toBe(201);
+        expect(claimResponse.body.verification.txtValue).toContain('customervoice-verification=');
+        expect(claimResponse.body.verification.proofToken).toBeTruthy();
+
+        const verifyResponse = await request(app)
+            .post(`/api/v1/tenants/${TENANT_ID}/domains/${claimResponse.body.id}/verify`)
+            .set(headers({ userId: ADMIN_ID, role: 'tenant_admin' }))
+            .send({
+                proofToken: claimResponse.body.verification.proofToken,
+            });
+
+        expect(verifyResponse.status).toBe(200);
+        expect(verifyResponse.body.verificationStatus).toBe('verified');
+
+        const impersonateResponse = await request(app)
+            .post(`/api/v1/operator/tenants/${TENANT_ID}/impersonate`)
+            .set(operatorHeaders({ userId: ADMIN_ID }))
+            .send({ assumedRole: 'tenant_admin' });
+
+        expect(impersonateResponse.status).toBe(201);
+        const impersonationToken = impersonateResponse.body.impersonation.sessionToken as string;
+
+        const impersonatedDomainsResponse = await request(app)
+            .get(`/api/v1/tenants/${TENANT_ID}/domains`)
+            .set('x-user-id', ADMIN_ID)
+            .set('x-user-email', 'admin@customervoice.test')
+            .set('x-impersonation-token', impersonationToken);
+
+        expect(impersonatedDomainsResponse.status).toBe(200);
+        expect(Array.isArray(impersonatedDomainsResponse.body.items)).toBe(true);
+
+        const revokeResponse = await request(app)
+            .post('/api/v1/operator/impersonations/revoke')
+            .set(operatorHeaders({ userId: ADMIN_ID }))
+            .send({ sessionToken: impersonationToken });
+
+        expect(revokeResponse.status).toBe(200);
+
+        const expiredImpersonationResponse = await request(app)
+            .get(`/api/v1/tenants/${TENANT_ID}/domains`)
+            .set('x-user-id', ADMIN_ID)
+            .set('x-user-email', 'admin@customervoice.test')
+            .set('x-impersonation-token', impersonationToken);
+
+        expect(expiredImpersonationResponse.status).toBe(401);
+        expect(expiredImpersonationResponse.body.error).toBe('invalid_impersonation_session');
+    });
+
+    it('applies tenant-aware webhook throttling on webhook admin routes', async () => {
+        process.env.TENANT_WEBHOOK_RATE_LIMIT = '1';
+
+        const firstResponse = await request(app)
+            .get(`/api/v1/workspaces/${WORKSPACE_ID}/webhooks`)
+            .set(headers({ userId: ADMIN_ID, role: 'workspace_admin' }));
+        expect(firstResponse.status).toBe(200);
+
+        const throttledResponse = await request(app)
+            .get(`/api/v1/workspaces/${WORKSPACE_ID}/webhooks`)
+            .set(headers({ userId: ADMIN_ID, role: 'workspace_admin' }));
+        expect(throttledResponse.status).toBe(429);
+        expect(throttledResponse.body.error).toBe('rate_limit_exceeded');
+
+        delete process.env.TENANT_WEBHOOK_RATE_LIMIT;
     });
 });

@@ -21,6 +21,13 @@ export async function emitAudit(
     workspaceId: workspaceValue,
     actorId,
     action,
-    metadata,
+    metadata: {
+      ...metadata,
+      tenantId: request.actor?.tenantId ?? null,
+      operatorUserId: request.actor?.operatorUserId ?? null,
+      operatorEmail: request.actor?.operatorEmail ?? null,
+      globalRole: request.actor?.globalRole ?? null,
+      impersonationSessionId: request.actor?.impersonationSessionId ?? null,
+    },
   });
 }

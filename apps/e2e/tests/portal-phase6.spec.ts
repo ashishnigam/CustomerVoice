@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 const apiBase = 'http://localhost:4000/api/v1';
-const boardSlug = 'customervoice-features';
-const boardApiPrefix = `/api/v1/public/boards/${boardSlug}`;
+const tenantKey = 'tnt_customervoicedemo';
+const boardPublicKey = 'customervoice-features';
+const portalPath = `/portal/t/${tenantKey}/boards/${boardPublicKey}`;
+const boardApiPrefix = `/api/v1/public/t/${tenantKey}/boards/${boardPublicKey}`;
 
 function getPortalBootstrapRequestKey(url: string): string | null {
   const parsed = new URL(url);
@@ -22,8 +24,8 @@ function serializeRequestCounts(counts: Map<string, number>): Record<string, num
 
 test.describe('Portal Phase 6 Core Flows', () => {
   test('renders seeded portal ideas in the browser', async ({ page }) => {
-    await page.goto(`/portal/boards/${boardSlug}`);
-    await expect(page).toHaveURL(new RegExp(`/portal/boards/${boardSlug}`));
+    await page.goto(portalPath);
+    await expect(page).toHaveURL(new RegExp(portalPath));
 
     await expect(page.locator('.cp-loading')).toHaveCount(0);
     await expect(page.locator('.cp-idea-card').first()).toBeVisible();
@@ -38,8 +40,8 @@ test.describe('Portal Phase 6 Core Flows', () => {
       bootstrapResponseCounts.set(requestKey, (bootstrapResponseCounts.get(requestKey) ?? 0) + 1);
     });
 
-    await page.goto(`/portal/boards/${boardSlug}`);
-    await expect(page).toHaveURL(new RegExp(`/portal/boards/${boardSlug}`));
+    await page.goto(portalPath);
+    await expect(page).toHaveURL(new RegExp(portalPath));
     await expect(page.locator('.cp-loading')).toHaveCount(0);
     await expect(page.locator('.cp-idea-card').first()).toBeVisible();
 
@@ -57,8 +59,8 @@ test.describe('Portal Phase 6 Core Flows', () => {
   });
 
   test('register, submit idea, vote, and comment via public APIs', async ({ request, page }) => {
-    await page.goto(`/portal/boards/${boardSlug}`);
-    await expect(page).toHaveURL(new RegExp(`/portal/boards/${boardSlug}`));
+    await page.goto(portalPath);
+    await expect(page).toHaveURL(new RegExp(portalPath));
     await expect(page.getByRole('button', { name: 'Submit Idea' })).toBeVisible();
 
     const email = `phase6-${Date.now()}@example.com`;
@@ -75,7 +77,7 @@ test.describe('Portal Phase 6 Core Flows', () => {
     const ideaTitle = `Phase 6 E2E Idea ${Date.now()}`;
     const ideaDescription = 'Verifying the end-to-end submit, vote, and comment flow.';
 
-    const createIdeaResponse = await request.post(`${apiBase}/public/boards/${boardSlug}/ideas`, {
+    const createIdeaResponse = await request.post(`${apiBase}/public/t/${tenantKey}/boards/${boardPublicKey}/ideas`, {
       headers: { authorization: `Bearer ${token}`, 'x-visitor-id': `e2e-${Date.now()}` },
       data: {
         title: ideaTitle,
@@ -86,14 +88,14 @@ test.describe('Portal Phase 6 Core Flows', () => {
     const createdIdea = (await createIdeaResponse.json()) as { id: string };
     expect(createdIdea.id).toBeTruthy();
 
-    const voteResponse = await request.post(`${apiBase}/public/boards/${boardSlug}/ideas/${createdIdea.id}/votes`, {
+    const voteResponse = await request.post(`${apiBase}/public/t/${tenantKey}/boards/${boardPublicKey}/ideas/${createdIdea.id}/votes`, {
       headers: { authorization: `Bearer ${token}`, 'x-visitor-id': `e2e-${Date.now()}-vote` },
     });
     expect(voteResponse.ok()).toBeTruthy();
     const voteData = (await voteResponse.json()) as { hasVoted: boolean };
     expect(voteData.hasVoted).toBeTruthy();
 
-    const commentResponse = await request.post(`${apiBase}/public/boards/${boardSlug}/ideas/${createdIdea.id}/comments`, {
+    const commentResponse = await request.post(`${apiBase}/public/t/${tenantKey}/boards/${boardPublicKey}/ideas/${createdIdea.id}/comments`, {
       headers: {
         authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -105,7 +107,7 @@ test.describe('Portal Phase 6 Core Flows', () => {
     expect(commentResponse.status()).toBe(201);
 
     const detailResponse = await request.get(
-      `${apiBase}/public/boards/${boardSlug}/ideas/${createdIdea.id}?threaded=true`,
+      `${apiBase}/public/t/${tenantKey}/boards/${boardPublicKey}/ideas/${createdIdea.id}?threaded=true`,
       {
         headers: { authorization: `Bearer ${token}` },
       },
