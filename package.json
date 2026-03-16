@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "start": "pnpm infra:up && pnpm dev",
+    "stack:up": "python3 scripts/dev_stack.py",
     "stop": "pnpm infra:down",
     "dev": "pnpm run dev:stack",
     "dev:stack": "turbo run dev --parallel --filter=@customervoice/api --filter=@customervoice/web --filter=@customervoice/worker",

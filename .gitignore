@@ -13,3 +13,5 @@ coverage
 .expo-shared
 .vscode
 .idea
+__pycache__
+*.pyc

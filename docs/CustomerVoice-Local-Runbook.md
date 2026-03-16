@@ -25,6 +25,11 @@ If `3333` is already occupied, Vite will move the web app to the next free port,
 pnpm start
 ```
 
+**Start everything with validation and readable diagnostics:**
+```bash
+pnpm stack:up
+```
+
 **Stop everything** (Docker infra):
 ```bash
 pnpm stop
@@ -34,6 +39,7 @@ Then press `Ctrl+C` in the terminal running `pnpm start` to kill the dev servers
 | Command | What it does |
 |---------|-------------|
 | `pnpm start` | `pnpm infra:up && pnpm dev` — starts Postgres, Redis, MailHog, MinIO, then API + web + worker |
+| `pnpm stack:up` | Python supervisor that creates missing env files, starts Docker + API + worker + web, validates readiness, and prints targeted fixes on failure |
 | `pnpm stop` | `pnpm infra:down` — stops all Docker containers |
 | `pnpm dev` | Starts only the dev servers (API + web + worker), assumes Docker infra is already running |
 | `pnpm dev:all` | Starts dev servers including Expo mobile |
